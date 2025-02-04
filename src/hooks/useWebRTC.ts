@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react'
 import {
     CHANNEL_CONFIG,
     MEDIA_CONSTRAINTS,
-    PRESENCE_SYNC_DELAY,
     WEBRTC_CONFIG,
 } from '@/constants/webrtc'
 import { createClient } from '@/utils/supabase.client'
@@ -39,19 +38,6 @@ export function useWebRTC() {
         setState(prev => ({ ...prev, isSharing: false }))
     }, [stream, peerConnection, channel, supabase])
 
-    const initializePeerConnection = useCallback(() => {
-        const pc = new RTCPeerConnection(WEBRTC_CONFIG)
-
-        pc.onconnectionstatechange = () => {
-            console.log('📡 WebRTC Connection State:', pc.connectionState)
-            if (pc.connectionState === 'disconnected') {
-                stopSharing()
-            }
-        }
-
-        return pc
-    }, [stopSharing])
-
     const handlePairDevice = useCallback(async () => {
         if (state.accessCode.length !== 6) {
             setState(prev => ({
@@ -71,24 +57,18 @@ export function useWebRTC() {
             // Create and subscribe to the channel
             const pairingChannel = supabase.channel(
                 `webrtc:${state.accessCode}`,
-                {
-                    config: CHANNEL_CONFIG,
-                },
+                { config: CHANNEL_CONFIG },
             )
 
-            // Wait for channel subscription and presence tracking
             await new Promise<void>((resolve, reject) => {
                 pairingChannel.subscribe(async status => {
                     if (status === 'SUBSCRIBED') {
-                        console.log('🌐 Web client subscribed to channel')
                         try {
                             await pairingChannel.track({
                                 online_at: new Date().toISOString(),
                             })
-                            console.log('✅ Web presence tracked successfully')
                             resolve()
                         } catch (error) {
-                            console.error('❌ Error tracking presence:', error)
                             reject(error)
                         }
                     } else if (
@@ -102,44 +82,16 @@ export function useWebRTC() {
                 })
             })
 
-            // Wait for presence sync
-            await new Promise(resolve =>
-                setTimeout(resolve, PRESENCE_SYNC_DELAY),
-            )
-
-            // Check for mobile client
-            const presenceState = pairingChannel.presenceState()
-            console.log(
-                '🔍 Checking for mobile client in presence state:',
-                JSON.stringify(presenceState, null, 2),
-            )
-
-            const hasMobileClient =
-                Object.keys(presenceState).includes('mobile') &&
-                presenceState.mobile.length > 0
-
-            if (!hasMobileClient) {
-                console.log(
-                    '❌ No mobile device found with code:',
-                    state.accessCode,
-                )
-                setState(prev => ({
-                    ...prev,
-                    error: 'No mobile device waiting with this code. Please check the code and try again.',
-                }))
-                supabase.removeChannel(pairingChannel)
-                return
-            }
-
-            console.log('✅ Mobile device found, initiating screen share')
-
             // Request screen sharing
-            console.log('🎥 Requesting screen share access...')
             localStream =
                 await navigator.mediaDevices.getDisplayMedia(MEDIA_CONSTRAINTS)
 
             // Initialize peer connection
-            localPeerConnection = initializePeerConnection()
+            const config = {
+                ...WEBRTC_CONFIG,
+                iceServers: [...WEBRTC_CONFIG.iceServers],
+            }
+            localPeerConnection = new RTCPeerConnection(config)
 
             // Set up WebRTC signal handling
             pairingChannel.on(
@@ -151,8 +103,6 @@ export function useWebRTC() {
 
                     try {
                         if (signal.type === 'answer' && signal.payload.answer) {
-                            if (localPeerConnection.currentRemoteDescription)
-                                return
                             console.log('📱 Received answer from mobile device')
                             const answer = new RTCSessionDescription(
                                 signal.payload.answer,
@@ -178,13 +128,14 @@ export function useWebRTC() {
             // Set up ICE candidate handling
             localPeerConnection.onicecandidate = ({ candidate }) => {
                 if (candidate) {
-                    console.log('🧊 Sending ICE candidate')
+                    const jsonCandidate = candidate.toJSON()
+                    console.log('🧊 Sending ICE candidate', jsonCandidate)
                     pairingChannel.send({
                         type: 'broadcast',
                         event: 'webrtc',
                         payload: {
                             type: 'ice-candidate',
-                            payload: { candidate },
+                            payload: { candidate: jsonCandidate },
                         },
                     })
                 }
@@ -223,11 +174,11 @@ export function useWebRTC() {
                 stopSharing()
             }
         } catch (error) {
+            console.error('Pairing error:', error)
             setState(prev => ({
                 ...prev,
                 error: 'Failed to pair device. Please try again.',
             }))
-            console.error('Pairing error:', error)
             // Clean up resources
             if (localStream) {
                 localStream.getTracks().forEach(track => track.stop())
@@ -242,13 +193,7 @@ export function useWebRTC() {
         } finally {
             setState(prev => ({ ...prev, isPairing: false }))
         }
-    }, [
-        state.accessCode,
-        supabase,
-        initializePeerConnection,
-        channel,
-        stopSharing,
-    ])
+    }, [state.accessCode, supabase, channel, stopSharing])
 
     return {
         state,
