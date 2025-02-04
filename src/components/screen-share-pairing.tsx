@@ -19,10 +19,10 @@ export function ScreenSharePairing({
 }: ScreenSharePairingProps) {
     return (
         <>
-            <div className="text-center mb-8">
-                <h1 className="text-white text-4xl font-mono mb-4">snippets</h1>
+            <div className="text-center mb-1">
+                <h1 className="text-white text-4xl font-mono mb-5">snippets</h1>
                 <p className="text-gray-300 text-sm">
-                    Enter the 6-digit access code from your mobile app
+                    Enter the 6-digit code from your mobile app
                 </p>
             </div>
 
@@ -31,13 +31,14 @@ export function ScreenSharePairing({
                     e.preventDefault()
                     onPairDevice()
                 }}
-                className="space-y-6"
+                className="space-y-4"
             >
                 <div className="flex flex-col items-center space-y-4">
                     <InputOTP
                         value={state.accessCode}
                         onChange={onAccessCodeChange}
                         maxLength={6}
+                        autoFocus
                     >
                         <InputOTPGroup>
                             <InputOTPSlot
