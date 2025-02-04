@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createClient } from '@/utils/supabase.client'
 
 import {
     InputOTP,
@@ -8,38 +9,173 @@ import {
     InputOTPSlot,
 } from '@/components/ui/input-otp'
 
+import type { RealtimeChannel } from '@supabase/supabase-js'
+
+interface WebRTCSignal {
+    type: 'offer' | 'answer' | 'ice-candidate'
+    payload: {
+        offer?: RTCSessionDescriptionInit
+        answer?: RTCSessionDescriptionInit
+        candidate?: RTCIceCandidateInit
+    }
+}
+
 export default function Home() {
     const [accessCode, setAccessCode] = useState('')
     const [isPairing, setIsPairing] = useState(false)
     const [error, setError] = useState('')
     const [isSharing, setIsSharing] = useState(false)
     const [stream, setStream] = useState<MediaStream | null>(null)
+    const [peerConnection, setPeerConnection] =
+        useState<RTCPeerConnection | null>(null)
+    const [supabase] = useState(() => createClient())
+    const [channel, setChannel] = useState<RealtimeChannel | null>(null)
+
+    const initializePeerConnection = () => {
+        const pc = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+        })
+
+        pc.onicecandidate = async event => {
+            if (event.candidate && channel) {
+                const signal: WebRTCSignal = {
+                    type: 'ice-candidate',
+                    payload: { candidate: event.candidate },
+                }
+
+                // Broadcast the ICE candidate
+                channel.send({
+                    type: 'broadcast',
+                    event: 'webrtc',
+                    payload: signal,
+                })
+            }
+        }
+
+        pc.onconnectionstatechange = () => {
+            console.log('Connection state:', pc.connectionState)
+            if (pc.connectionState === 'disconnected') {
+                stopSharing()
+            }
+        }
+
+        return pc
+    }
+
+    useEffect(() => {
+        if (!accessCode || !peerConnection) return
+
+        // Subscribe to WebRTC signaling channel
+        const newChannel = supabase.channel(`webrtc:${accessCode}`, {
+            config: {
+                broadcast: { self: false },
+                presence: {
+                    key: 'web',
+                },
+            },
+        })
+
+        // Listen for WebRTC signals
+        newChannel.on('broadcast', { event: 'webrtc' }, async ({ payload }) => {
+            const signal = payload as WebRTCSignal
+            if (!peerConnection) return
+
+            try {
+                if (signal.type === 'answer' && signal.payload.answer) {
+                    if (peerConnection.currentRemoteDescription) return
+                    console.log('📱 Received answer from mobile device')
+                    const answer = new RTCSessionDescription(
+                        signal.payload.answer,
+                    )
+                    await peerConnection.setRemoteDescription(answer)
+                } else if (
+                    signal.type === 'ice-candidate' &&
+                    signal.payload.candidate
+                ) {
+                    await peerConnection.addIceCandidate(
+                        new RTCIceCandidate(signal.payload.candidate),
+                    )
+                }
+            } catch (err) {
+                console.error('Error handling signal:', err)
+            }
+        })
+
+        newChannel.subscribe()
+        setChannel(newChannel)
+
+        return () => {
+            supabase.removeChannel(newChannel)
+            setChannel(null)
+        }
+    }, [accessCode, peerConnection, supabase])
 
     const stopSharing = () => {
         if (stream) {
             stream.getTracks().forEach(track => track.stop())
             setStream(null)
         }
+        if (peerConnection) {
+            peerConnection.close()
+            setPeerConnection(null)
+        }
+        if (channel) {
+            supabase.removeChannel(channel)
+            setChannel(null)
+        }
         setIsSharing(false)
     }
 
     const startScreenShare = async () => {
         try {
+            console.log('🎥 Requesting screen share access...')
             const mediaStream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
                 audio: true,
             })
+
+            const pc = initializePeerConnection()
+            setPeerConnection(pc)
+
+            mediaStream.getTracks().forEach(track => {
+                pc.addTrack(track, mediaStream)
+            })
+
             setStream(mediaStream)
             setIsSharing(true)
 
+            // Create and set local description
+            const offer = await pc.createOffer()
+            await pc.setLocalDescription(offer)
+
+            // Send offer through broadcast
+            if (channel) {
+                console.log('📤 Sending WebRTC offer to mobile device')
+                const signal: WebRTCSignal = {
+                    type: 'offer',
+                    payload: { offer },
+                }
+
+                channel.send({
+                    type: 'broadcast',
+                    event: 'webrtc',
+                    payload: signal,
+                })
+            }
+
             // Listen for when the user stops sharing via the browser UI
             mediaStream.getVideoTracks()[0].onended = () => {
+                console.log('🛑 Screen sharing stopped by user')
                 stopSharing()
             }
         } catch (error) {
             console.error('Error sharing screen:', error)
             setError('Failed to start screen sharing. Please try again.')
             setIsSharing(false)
+            if (peerConnection) {
+                peerConnection.close()
+                setPeerConnection(null)
+            }
         }
     }
 
@@ -52,9 +188,51 @@ export default function Home() {
 
         setIsPairing(true)
         setError('')
+        console.log('🔄 Attempting to pair with code:', accessCode)
 
         try {
-            // For now, just start screen sharing for any valid code
+            // Create and subscribe to the channel to check for mobile client
+            const pairingChannel = supabase.channel(`webrtc:${accessCode}`, {
+                config: {
+                    broadcast: { self: false },
+                    presence: {
+                        key: 'web',
+                    },
+                },
+            })
+
+            // Track our own presence
+            pairingChannel.subscribe(async status => {
+                if (status === 'SUBSCRIBED') {
+                    await pairingChannel.track({
+                        online_at: new Date().toISOString(),
+                    })
+                }
+            })
+
+            // Wait a moment for presence sync
+            await new Promise(resolve => setTimeout(resolve, 500))
+
+            // Get the channel presence state
+            const presenceState = pairingChannel.presenceState()
+
+            // Check if there's a mobile client waiting
+            const hasMobileClient = Object.values(presenceState).some(
+                presence =>
+                    presence.some(p => p.presence_ref.includes('mobile')),
+            )
+
+            if (!hasMobileClient) {
+                console.log('❌ No mobile device found with code:', accessCode)
+                setError(
+                    'No mobile device waiting with this code. Please check the code and try again.',
+                )
+                supabase.removeChannel(pairingChannel)
+                return
+            }
+
+            console.log('✅ Mobile device found, initiating screen share')
+            // If we found a mobile client, start screen sharing
             await startScreenShare()
         } catch (error) {
             setError('Failed to pair device. Please try again.')
