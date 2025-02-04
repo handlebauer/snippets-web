@@ -10,19 +10,24 @@ export default function Home() {
         useWebRTC()
 
     return (
-        <div className="min-h-screen flex flex-col items-center justify-center p-8">
-            <main className="w-full max-w-md">
-                {isSharing ? (
-                    <ActiveScreenShare onStopSharing={stopSharing} />
-                ) : (
-                    <ScreenSharePairing
-                        state={state}
-                        onAccessCodeChange={code =>
-                            setState(prev => ({ ...prev, accessCode: code }))
-                        }
-                        onPairDevice={handlePairDevice}
-                    />
-                )}
+        <div className="min-h-screen bg-[#121212] flex flex-col items-center justify-center">
+            <main className="w-full max-w-md flex flex-col items-center p-8">
+                <div className="w-full bg-[#1E1E1E] rounded-2xl p-8">
+                    {isSharing ? (
+                        <ActiveScreenShare onStopSharing={stopSharing} />
+                    ) : (
+                        <ScreenSharePairing
+                            state={state}
+                            onAccessCodeChange={code =>
+                                setState(prev => ({
+                                    ...prev,
+                                    accessCode: code,
+                                }))
+                            }
+                            onPairDevice={handlePairDevice}
+                        />
+                    )}
+                </div>
             </main>
         </div>
     )
