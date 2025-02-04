@@ -1,0 +1,2 @@
+# Run linting
+bunx lint-staged --allow-empty
