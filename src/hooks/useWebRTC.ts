@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import {
     CHANNEL_CONFIG,
     MEDIA_CONSTRAINTS,
@@ -6,7 +6,11 @@ import {
 } from '@/constants/webrtc'
 import { createClient } from '@/utils/supabase.client'
 
-import type { ScreenShareState, WebRTCSignal } from '@/types/webrtc'
+import type {
+    RecordingSignal,
+    ScreenShareState,
+    WebRTCSignal,
+} from '@/types/webrtc'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
 export function useWebRTC() {
@@ -15,17 +19,20 @@ export function useWebRTC() {
         isPairing: false,
         error: null,
         accessCode: '',
+        isRecording: false,
     })
-    const [stream, setStream] = useState<MediaStream | null>(null)
+    const streamRef = useRef<MediaStream | null>(null)
+    const isRecordingRef = useRef(false)
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null)
     const [peerConnection, setPeerConnection] =
         useState<RTCPeerConnection | null>(null)
     const [channel, setChannel] = useState<RealtimeChannel | null>(null)
     const [supabase] = useState(() => createClient())
 
     const stopSharing = useCallback(() => {
-        if (stream) {
-            stream.getTracks().forEach(track => track.stop())
-            setStream(null)
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop())
+            streamRef.current = null
         }
         if (peerConnection) {
             peerConnection.close()
@@ -35,8 +42,141 @@ export function useWebRTC() {
             supabase.removeChannel(channel)
             setChannel(null)
         }
-        setState(prev => ({ ...prev, isSharing: false }))
-    }, [stream, peerConnection, channel, supabase])
+        if (mediaRecorderRef.current && isRecordingRef.current) {
+            mediaRecorderRef.current.stop()
+            mediaRecorderRef.current = null
+        }
+        isRecordingRef.current = false
+        setState(prev => ({ ...prev, isSharing: false, isRecording: false }))
+    }, [peerConnection, channel, supabase])
+
+    const handleRecordingSignal = useCallback(
+        (signal: RecordingSignal) => {
+            const stream = streamRef.current
+            const mediaRecorder = mediaRecorderRef.current
+
+            console.log('📥 Received recording signal:', {
+                action: signal.action,
+                hasStream: !!stream,
+                streamTracks: stream?.getTracks().length ?? 0,
+                streamTrackStates:
+                    stream?.getTracks().map(t => ({
+                        kind: t.kind,
+                        enabled: t.enabled,
+                        muted: t.muted,
+                        readyState: t.readyState,
+                    })) ?? [],
+                isCurrentlyRecording: isRecordingRef.current,
+                hasMediaRecorder: !!mediaRecorder,
+                mediaRecorderState: mediaRecorder?.state,
+            })
+
+            if (!stream) {
+                console.error('❌ Cannot record: No stream available', {
+                    isSharing: state.isSharing,
+                    isPairing: state.isPairing,
+                    peerConnectionState: peerConnection?.connectionState,
+                    channelState: channel?.state,
+                })
+                return
+            }
+
+            if (signal.action === 'start' && !isRecordingRef.current) {
+                console.log('🎥 Starting recording...', {
+                    streamActive: stream.active,
+                    streamId: stream.id,
+                    tracks: stream.getTracks().map(t => ({
+                        kind: t.kind,
+                        enabled: t.enabled,
+                        muted: t.muted,
+                        readyState: t.readyState,
+                    })),
+                })
+                try {
+                    const recorder = new MediaRecorder(stream, {
+                        mimeType: 'video/webm;codecs=vp9',
+                    })
+
+                    const chunks: Blob[] = []
+                    recorder.ondataavailable = e => {
+                        console.log('💾 Received data chunk:', {
+                            size: e.data.size,
+                            type: e.data.type,
+                            recorderState: recorder.state,
+                        })
+                        if (e.data.size > 0) {
+                            chunks.push(e.data)
+                        }
+                    }
+
+                    recorder.onstop = () => {
+                        console.log(
+                            '⏹️ Recording stopped, processing data...',
+                            {
+                                chunks: chunks.length,
+                                totalSize: chunks.reduce(
+                                    (acc, chunk) => acc + chunk.size,
+                                    0,
+                                ),
+                            },
+                        )
+                        const blob = new Blob(chunks, { type: 'video/webm' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        const filename = `screen-recording-${new Date().toISOString()}.webm`
+                        a.download = filename
+                        console.log('💾 Saving recording:', {
+                            filename,
+                            size: blob.size,
+                        })
+                        a.click()
+                        URL.revokeObjectURL(url)
+                        isRecordingRef.current = false
+                        mediaRecorderRef.current = null
+                        setState(prev => ({ ...prev, isRecording: false }))
+                    }
+
+                    recorder.onerror = event => {
+                        console.error('❌ MediaRecorder error:', event)
+                        isRecordingRef.current = false
+                        mediaRecorderRef.current = null
+                        setState(prev => ({ ...prev, isRecording: false }))
+                    }
+
+                    // Start recording with a timeslice to get regular data chunks
+                    isRecordingRef.current = true
+                    setState(prev => ({ ...prev, isRecording: true }))
+                    mediaRecorderRef.current = recorder
+                    recorder.start(1000) // Get a chunk every second
+                    console.log('✅ Recording started successfully')
+                } catch (error) {
+                    console.error('❌ Failed to start recording:', error)
+                    isRecordingRef.current = false
+                    setState(prev => ({ ...prev, isRecording: false }))
+                }
+            } else if (signal.action === 'stop') {
+                // Debug log to see why we're not hitting the stop condition
+                console.log('🔍 Stop signal received but conditions not met:', {
+                    signalAction: signal.action,
+                    isRecording: isRecordingRef.current,
+                    hasMediaRecorder: !!mediaRecorder,
+                    mediaRecorderState: mediaRecorder?.state,
+                })
+
+                if (isRecordingRef.current && mediaRecorder) {
+                    console.log('⏹️ Stopping recording...', {
+                        mediaRecorderState: mediaRecorder.state,
+                        streamActive: stream.active,
+                    })
+
+                    mediaRecorder.requestData()
+                    mediaRecorder.stop()
+                }
+            }
+        },
+        [state.isSharing, state.isPairing, peerConnection, channel],
+    )
 
     const handlePairDevice = useCallback(async () => {
         if (state.accessCode.length !== 6) {
@@ -85,6 +225,13 @@ export function useWebRTC() {
             // Request screen sharing
             localStream =
                 await navigator.mediaDevices.getDisplayMedia(MEDIA_CONSTRAINTS)
+            console.log('🎥 Got screen sharing stream:', {
+                tracks: localStream.getTracks().map(t => ({
+                    kind: t.kind,
+                    enabled: t.enabled,
+                    muted: t.muted,
+                })),
+            })
 
             // Initialize peer connection
             const config = {
@@ -144,6 +291,11 @@ export function useWebRTC() {
             // Add tracks to peer connection
             localStream.getTracks().forEach(track => {
                 if (localPeerConnection) {
+                    console.log('➕ Adding track to peer connection:', {
+                        kind: track.kind,
+                        enabled: track.enabled,
+                        muted: track.muted,
+                    })
                     localPeerConnection.addTrack(track, localStream!)
                 }
             })
@@ -164,8 +316,30 @@ export function useWebRTC() {
 
             // Update state after everything is set up
             setPeerConnection(localPeerConnection)
-            setStream(localStream)
+            streamRef.current = localStream
             setChannel(pairingChannel)
+
+            // NOW set up recording signal handler after we have the stream
+            pairingChannel.on(
+                'broadcast',
+                { event: 'recording' },
+                ({ payload }) => {
+                    console.log('📡 Channel received recording event:', {
+                        channelState: pairingChannel.state,
+                        presenceState: pairingChannel.presenceState(),
+                        hasStream: !!localStream,
+                        streamActive: localStream?.active,
+                    })
+                    handleRecordingSignal(payload as RecordingSignal)
+                },
+            )
+
+            console.log('✅ WebRTC setup complete:', {
+                hasStream: !!localStream,
+                streamTracks: localStream.getTracks().length,
+                hasPeerConnection: !!localPeerConnection,
+                hasChannel: !!pairingChannel,
+            })
             setState(prev => ({ ...prev, isSharing: true }))
 
             // Listen for when the user stops sharing
@@ -193,7 +367,13 @@ export function useWebRTC() {
         } finally {
             setState(prev => ({ ...prev, isPairing: false }))
         }
-    }, [state.accessCode, supabase, channel, stopSharing])
+    }, [
+        state.accessCode,
+        supabase,
+        channel,
+        stopSharing,
+        handleRecordingSignal,
+    ])
 
     return {
         state,
@@ -204,5 +384,6 @@ export function useWebRTC() {
         isPairing: state.isPairing,
         error: state.error,
         accessCode: state.accessCode,
+        isRecording: state.isRecording,
     }
 }
