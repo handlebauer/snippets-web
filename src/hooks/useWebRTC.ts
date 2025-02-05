@@ -109,7 +109,7 @@ export function useWebRTC() {
                         }
                     }
 
-                    recorder.onstop = () => {
+                    recorder.onstop = async () => {
                         console.log(
                             '⏹️ Recording stopped, processing data...',
                             {
@@ -121,20 +121,44 @@ export function useWebRTC() {
                             },
                         )
                         const blob = new Blob(chunks, { type: 'video/webm' })
-                        const url = URL.createObjectURL(blob)
-                        const a = document.createElement('a')
-                        a.href = url
+
+                        // Create FormData and append the video
+                        const formData = new FormData()
                         const filename = `screen-recording-${new Date().toISOString()}.webm`
-                        a.download = filename
-                        console.log('💾 Saving recording:', {
-                            filename,
-                            size: blob.size,
-                        })
-                        a.click()
-                        URL.revokeObjectURL(url)
-                        isRecordingRef.current = false
-                        mediaRecorderRef.current = null
-                        setState(prev => ({ ...prev, isRecording: false }))
+                        formData.append('video', blob, filename)
+                        formData.append('sessionCode', state.accessCode)
+
+                        try {
+                            console.log('📤 Uploading video to server...')
+                            const response = await fetch('/api/videos/upload', {
+                                method: 'POST',
+                                body: formData,
+                            })
+
+                            if (!response.ok) {
+                                const errorData = await response.json()
+                                console.error('❌ Upload response error:', {
+                                    status: response.status,
+                                    statusText: response.statusText,
+                                    error: errorData,
+                                })
+                                throw new Error(
+                                    `Failed to upload video: ${errorData.error || response.statusText}`,
+                                )
+                            }
+
+                            const data = await response.json()
+                            console.log(
+                                '✅ Video uploaded successfully:',
+                                data.video,
+                            )
+                        } catch (error) {
+                            console.error('❌ Failed to upload video:', error)
+                        } finally {
+                            isRecordingRef.current = false
+                            mediaRecorderRef.current = null
+                            setState(prev => ({ ...prev, isRecording: false }))
+                        }
                     }
 
                     recorder.onerror = event => {
@@ -175,7 +199,13 @@ export function useWebRTC() {
                 }
             }
         },
-        [state.isSharing, state.isPairing, peerConnection, channel],
+        [
+            state.isSharing,
+            state.isPairing,
+            peerConnection,
+            channel,
+            state.accessCode,
+        ],
     )
 
     const handlePairDevice = useCallback(async () => {
@@ -201,25 +231,54 @@ export function useWebRTC() {
             )
 
             await new Promise<void>((resolve, reject) => {
-                pairingChannel.subscribe(async status => {
-                    if (status === 'SUBSCRIBED') {
-                        try {
-                            await pairingChannel.track({
-                                online_at: new Date().toISOString(),
-                            })
-                            resolve()
-                        } catch (error) {
-                            reject(error)
+                let presenceSynced = false
+
+                pairingChannel
+                    .on('presence', { event: 'sync' }, () => {
+                        console.log('📡 Presence synced')
+                        presenceSynced = true
+                    })
+                    .subscribe(async status => {
+                        console.log('📡 Channel status:', status)
+                        if (status === 'SUBSCRIBED') {
+                            try {
+                                // Track our presence
+                                await pairingChannel.track({
+                                    online_at: new Date().toISOString(),
+                                    client_type: 'web',
+                                    session_code: state.accessCode,
+                                })
+
+                                // Wait for presence to sync
+                                const syncTimeout = setTimeout(() => {
+                                    if (!presenceSynced) {
+                                        reject(
+                                            new Error('Presence sync timeout'),
+                                        )
+                                    }
+                                }, 5000)
+
+                                // Wait for presence to sync
+                                while (!presenceSynced) {
+                                    await new Promise(r => setTimeout(r, 100))
+                                }
+                                clearTimeout(syncTimeout)
+
+                                resolve()
+                            } catch (error) {
+                                reject(error)
+                            }
+                        } else if (
+                            status === 'CLOSED' ||
+                            status === 'CHANNEL_ERROR'
+                        ) {
+                            reject(
+                                new Error(
+                                    `Channel subscription failed: ${status}`,
+                                ),
+                            )
                         }
-                    } else if (
-                        status === 'CLOSED' ||
-                        status === 'CHANNEL_ERROR'
-                    ) {
-                        reject(
-                            new Error(`Channel subscription failed: ${status}`),
-                        )
-                    }
-                })
+                    })
             })
 
             // Request screen sharing
