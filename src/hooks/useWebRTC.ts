@@ -9,6 +9,7 @@ import { createClient } from '@/utils/supabase.client'
 import type {
     RecordingSignal,
     ScreenShareState,
+    VideoProcessingSignal,
     WebRTCSignal,
 } from '@/types/webrtc'
 import type { RealtimeChannel } from '@supabase/supabase-js'
@@ -27,6 +28,9 @@ export function useWebRTC() {
     const [peerConnection, setPeerConnection] =
         useState<RTCPeerConnection | null>(null)
     const [channel, setChannel] = useState<RealtimeChannel | null>(null)
+    const [videoChannel, setVideoChannel] = useState<RealtimeChannel | null>(
+        null,
+    )
     const [supabase] = useState(() => createClient())
 
     const stopSharing = useCallback(() => {
@@ -42,13 +46,17 @@ export function useWebRTC() {
             supabase.removeChannel(channel)
             setChannel(null)
         }
+        if (videoChannel) {
+            supabase.removeChannel(videoChannel)
+            setVideoChannel(null)
+        }
         if (mediaRecorderRef.current && isRecordingRef.current) {
             mediaRecorderRef.current.stop()
             mediaRecorderRef.current = null
         }
         isRecordingRef.current = false
         setState(prev => ({ ...prev, isSharing: false, isRecording: false }))
-    }, [peerConnection, channel, supabase])
+    }, [peerConnection, channel, videoChannel, supabase])
 
     const handleRecordingSignal = useCallback(
         (signal: RecordingSignal) => {
@@ -128,36 +136,160 @@ export function useWebRTC() {
                         formData.append('video', blob, filename)
                         formData.append('sessionCode', state.accessCode)
 
-                        try {
-                            console.log('📤 Uploading video to server...')
-                            const response = await fetch('/api/videos/upload', {
-                                method: 'POST',
-                                body: formData,
+                        // Set up video processing channel if not already set up
+                        if (!videoChannel) {
+                            console.log(
+                                '📡 Setting up video processing channel:',
+                                {
+                                    channelName: `video:${state.accessCode}`,
+                                    accessCode: state.accessCode,
+                                },
+                            )
+                            const newVideoChannel = supabase.channel(
+                                `video:${state.accessCode}`,
+                                {
+                                    config: CHANNEL_CONFIG,
+                                },
+                            )
+
+                            // Wait for subscription to be ready
+                            await new Promise<void>((resolve, reject) => {
+                                const timeout = setTimeout(() => {
+                                    reject(
+                                        new Error(
+                                            'Video channel subscription timeout',
+                                        ),
+                                    )
+                                }, 5000)
+
+                                newVideoChannel.subscribe(status => {
+                                    console.log('📡 Video channel status:', {
+                                        status,
+                                        channelName: `video:${state.accessCode}`,
+                                    })
+                                    if (status === 'SUBSCRIBED') {
+                                        clearTimeout(timeout)
+                                        resolve()
+                                    } else if (
+                                        status === 'CLOSED' ||
+                                        status === 'CHANNEL_ERROR'
+                                    ) {
+                                        clearTimeout(timeout)
+                                        reject(
+                                            new Error(
+                                                `Video channel subscription failed: ${status}`,
+                                            ),
+                                        )
+                                    }
+                                })
                             })
 
-                            if (!response.ok) {
-                                const errorData = await response.json()
-                                console.error('❌ Upload response error:', {
-                                    status: response.status,
-                                    statusText: response.statusText,
-                                    error: errorData,
-                                })
-                                throw new Error(
-                                    `Failed to upload video: ${errorData.error || response.statusText}`,
+                            // Store channel reference before proceeding
+                            const localVideoChannel = newVideoChannel
+                            setVideoChannel(localVideoChannel)
+
+                            // Send initial processing status
+                            const sendProcessingStatus = async (
+                                signal: VideoProcessingSignal,
+                            ) => {
+                                console.log(
+                                    '📤 Sending video processing status:',
+                                    {
+                                        signal,
+                                        channelState: localVideoChannel.state,
+                                        channelName: `video:${state.accessCode}`,
+                                    },
                                 )
+                                try {
+                                    await localVideoChannel.send({
+                                        type: 'broadcast',
+                                        event: 'video_processing',
+                                        payload: signal,
+                                    })
+                                    console.log(
+                                        '✅ Video processing status sent',
+                                    )
+                                } catch (error) {
+                                    console.error(
+                                        '❌ Failed to send video processing status:',
+                                        {
+                                            error,
+                                            channelState:
+                                                localVideoChannel.state,
+                                        },
+                                    )
+                                }
                             }
 
-                            const data = await response.json()
-                            console.log(
-                                '✅ Video uploaded successfully:',
-                                data.video,
-                            )
-                        } catch (error) {
-                            console.error('❌ Failed to upload video:', error)
-                        } finally {
-                            isRecordingRef.current = false
-                            mediaRecorderRef.current = null
-                            setState(prev => ({ ...prev, isRecording: false }))
+                            try {
+                                // Send initial processing status
+                                await sendProcessingStatus({
+                                    type: 'video_processing',
+                                    status: 'processing',
+                                })
+
+                                console.log('📤 Uploading video to server...')
+                                const response = await fetch(
+                                    '/api/videos/upload',
+                                    {
+                                        method: 'POST',
+                                        body: formData,
+                                    },
+                                )
+
+                                if (!response.ok) {
+                                    const errorData = await response.json()
+                                    console.error('❌ Upload response error:', {
+                                        status: response.status,
+                                        statusText: response.statusText,
+                                        error: errorData,
+                                    })
+                                    await sendProcessingStatus({
+                                        type: 'video_processing',
+                                        status: 'error',
+                                        error:
+                                            errorData.error ||
+                                            response.statusText,
+                                    })
+                                    throw new Error(
+                                        `Failed to upload video: ${errorData.error || response.statusText}`,
+                                    )
+                                }
+
+                                const data = await response.json()
+                                console.log(
+                                    '✅ Video uploaded successfully:',
+                                    data.video,
+                                )
+
+                                // Send completion status with video ID
+                                await sendProcessingStatus({
+                                    type: 'video_processing',
+                                    status: 'completed',
+                                    videoId: data.video.id,
+                                })
+                            } catch (error) {
+                                console.error(
+                                    '❌ Failed to upload video:',
+                                    error,
+                                )
+                                // Send error status if not already sent
+                                await sendProcessingStatus({
+                                    type: 'video_processing',
+                                    status: 'error',
+                                    error:
+                                        error instanceof Error
+                                            ? error.message
+                                            : 'Failed to process video',
+                                })
+                            } finally {
+                                isRecordingRef.current = false
+                                mediaRecorderRef.current = null
+                                setState(prev => ({
+                                    ...prev,
+                                    isRecording: false,
+                                }))
+                            }
                         }
                     }
 
@@ -205,6 +337,8 @@ export function useWebRTC() {
             peerConnection,
             channel,
             state.accessCode,
+            videoChannel,
+            supabase,
         ],
     )
 
