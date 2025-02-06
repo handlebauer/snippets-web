@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { promises as fs } from 'fs'
 import os from 'os'
 import { join } from 'path'
@@ -291,7 +292,8 @@ export async function POST(request: Request) {
                         reject(err)
                         return
                     }
-                    const duration = Math.round(data.format.duration || 0)
+                    // Keep full precision of duration instead of rounding
+                    const duration = data.format.duration || 0
                     console.log('ℹ️ Video metadata:', {
                         duration,
                         format: data.format,
@@ -305,8 +307,9 @@ export async function POST(request: Request) {
 
         // Upload both video and thumbnail to Supabase Storage
         const fileName = `video_${Date.now()}`
-        const videoPath = `${fileName}.mp4`
-        const thumbnailPath = `${fileName}_thumb.jpg`
+        const videoId = crypto.randomUUID() // Generate UUID for the video folder
+        const videoPath = `${videoId}/${fileName}.mp4`
+        const thumbnailPath = `${videoId}/${fileName}_thumb.jpg`
 
         console.log('☁️ Uploading files to storage...')
         const [videoUpload, thumbnailUpload] = await Promise.all([
@@ -355,13 +358,15 @@ export async function POST(request: Request) {
         const { data: videoData, error: dbError } = await supabase
             .from('videos')
             .insert({
+                id: videoId,
                 profile_id: userId,
                 name: file.name.replace(/\.[^/.]+$/, ''), // Remove file extension
-                storage_path: videoUpload.data.path,
+                storage_path: videoPath,
                 thumbnail_url: thumbnailUrl,
                 duration: metadata.duration,
                 size: outputBuffer.length,
                 mime_type: 'video/mp4',
+                trim_end: metadata.duration,
             })
             .select()
             .single()
