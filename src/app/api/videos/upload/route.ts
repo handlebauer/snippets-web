@@ -193,60 +193,92 @@ export async function POST(request: Request) {
 
         // Convert webm to mp4 using fluent-ffmpeg
         console.log('🎬 Starting video conversion: webm -> mp4')
-        const outputBuffer = await new Promise<Buffer>(
-            async (resolve, reject) => {
-                try {
-                    // Create a temporary file for the output
-                    const tempDir = await fs.mkdtemp(
-                        join(os.tmpdir(), 'video-'),
-                    )
-                    const outputPath = join(tempDir, 'output.mp4')
-                    console.log('📁 Using temporary file:', outputPath)
+        const { outputBuffer, thumbnailBuffer } = await new Promise<{
+            outputBuffer: Buffer
+            thumbnailBuffer: Buffer
+        }>(async (resolve, reject) => {
+            try {
+                // Create a temporary file for the output
+                const tempDir = await fs.mkdtemp(join(os.tmpdir(), 'video-'))
+                const outputPath = join(tempDir, 'output.mp4')
+                const thumbnailPath = join(tempDir, 'thumbnail.jpg')
+                console.log('📁 Using temporary files:', {
+                    video: outputPath,
+                    thumbnail: thumbnailPath,
+                })
 
-                    await new Promise<void>(
-                        (resolveConversion, rejectConversion) => {
-                            ffmpeg(readableStream)
-                                .toFormat('mp4')
-                                .videoFilters('pad=ceil(iw/2)*2:ceil(ih/2)*2')
-                                .outputOptions([
-                                    '-pix_fmt yuv420p',
-                                    '-c:v libx264',
-                                    '-preset fast',
-                                    '-crf 23',
-                                    '-movflags +faststart',
-                                ])
-                                .on('error', err => {
-                                    console.error(
-                                        '❌ FFmpeg conversion error:',
-                                        err,
-                                    )
-                                    rejectConversion(err)
-                                })
-                                .on('end', () => {
-                                    console.log('✅ Conversion to MP4 complete')
-                                    resolveConversion()
-                                })
-                                .on('stderr', stderrLine => {
-                                    console.log('🔧 FFmpeg:', stderrLine)
-                                })
-                                .save(outputPath)
-                        },
-                    )
+                await new Promise<void>(
+                    (resolveConversion, rejectConversion) => {
+                        ffmpeg(readableStream)
+                            .toFormat('mp4')
+                            .videoFilters('pad=ceil(iw/2)*2:ceil(ih/2)*2')
+                            .outputOptions([
+                                '-pix_fmt yuv420p',
+                                '-c:v libx264',
+                                '-preset fast',
+                                '-crf 23',
+                                '-movflags +faststart',
+                            ])
+                            .on('error', err => {
+                                console.error(
+                                    '❌ FFmpeg conversion error:',
+                                    err,
+                                )
+                                rejectConversion(err)
+                            })
+                            .on('end', () => {
+                                console.log('✅ Conversion to MP4 complete')
+                                resolveConversion()
+                            })
+                            .on('stderr', stderrLine => {
+                                console.log('🔧 FFmpeg:', stderrLine)
+                            })
+                            .save(outputPath)
+                    },
+                )
 
-                    // Read the output file
-                    const outputBuffer = await fs.readFile(outputPath)
-                    console.log('📊 Output file size:', outputBuffer.length)
+                // Generate thumbnail from the converted video
+                console.log('🖼️ Generating thumbnail...')
+                await new Promise<void>((resolveThumbnail, rejectThumbnail) => {
+                    ffmpeg(outputPath)
+                        .screenshots({
+                            timestamps: ['10%'], // Take thumbnail at 10% of the video
+                            filename: 'thumbnail.jpg',
+                            folder: tempDir,
+                            size: '480x?', // Width 480px, maintain aspect ratio
+                        })
+                        .on('error', err => {
+                            console.error('❌ Thumbnail generation error:', err)
+                            rejectThumbnail(err)
+                        })
+                        .on('end', () => {
+                            console.log('✅ Thumbnail generation complete')
+                            resolveThumbnail()
+                        })
+                })
 
-                    // Clean up
-                    await fs.rm(tempDir, { recursive: true, force: true })
-                    console.log('🧹 Cleaned up temporary files')
+                // Read the output files
+                const [videoBuffer, thumbBuffer] = await Promise.all([
+                    fs.readFile(outputPath),
+                    fs.readFile(thumbnailPath),
+                ])
+                console.log('📊 Output sizes:', {
+                    video: videoBuffer.length,
+                    thumbnail: thumbBuffer.length,
+                })
 
-                    resolve(outputBuffer)
-                } catch (err) {
-                    reject(err)
-                }
-            },
-        )
+                // Clean up
+                await fs.rm(tempDir, { recursive: true, force: true })
+                console.log('🧹 Cleaned up temporary files')
+
+                resolve({
+                    outputBuffer: videoBuffer,
+                    thumbnailBuffer: thumbBuffer,
+                })
+            } catch (err) {
+                reject(err)
+            }
+        })
 
         // Get duration using ffprobe after conversion
         console.log('📏 Getting video metadata...')
@@ -271,19 +303,30 @@ export async function POST(request: Request) {
             },
         )
 
-        // Upload to Supabase Storage
-        const fileName = `video_${Date.now()}.mp4`
-        console.log('☁️ Uploading to storage:', fileName)
-        const { data: storageData, error: storageError } =
-            await supabase.storage
-                .from('videos')
-                .upload(fileName, outputBuffer, {
-                    contentType: 'video/mp4',
-                    cacheControl: '3600',
-                })
+        // Upload both video and thumbnail to Supabase Storage
+        const fileName = `video_${Date.now()}`
+        const videoPath = `${fileName}.mp4`
+        const thumbnailPath = `${fileName}_thumb.jpg`
 
-        if (storageError) {
-            console.error('❌ Storage upload failed:', storageError)
+        console.log('☁️ Uploading files to storage...')
+        const [videoUpload, thumbnailUpload] = await Promise.all([
+            supabase.storage.from('videos').upload(videoPath, outputBuffer, {
+                contentType: 'video/mp4',
+                cacheControl: '3600',
+            }),
+            supabase.storage
+                .from('videos')
+                .upload(thumbnailPath, thumbnailBuffer, {
+                    contentType: 'image/jpeg',
+                    cacheControl: '3600',
+                }),
+        ])
+
+        if (videoUpload.error || thumbnailUpload.error) {
+            console.error('❌ Storage upload failed:', {
+                video: videoUpload.error,
+                thumbnail: thumbnailUpload.error,
+            })
             return NextResponse.json(
                 { error: 'Failed to upload video' },
                 { status: 500 },
@@ -291,9 +334,18 @@ export async function POST(request: Request) {
         }
 
         console.log('✅ Storage upload complete:', {
-            path: storageData.path,
-            size: outputBuffer.length,
+            video: videoUpload.data.path,
+            thumbnail: thumbnailUpload.data.path,
+            sizes: {
+                video: outputBuffer.length,
+                thumbnail: thumbnailBuffer.length,
+            },
         })
+
+        // Get public URLs for the uploaded files
+        const {
+            data: { publicUrl: thumbnailUrl },
+        } = supabase.storage.from('videos').getPublicUrl(thumbnailPath)
 
         // Get the user ID from the mobile client's presence data
         const userId = presenceData.user_id
@@ -305,7 +357,8 @@ export async function POST(request: Request) {
             .insert({
                 profile_id: userId,
                 name: file.name.replace(/\.[^/.]+$/, ''), // Remove file extension
-                storage_path: storageData.path,
+                storage_path: videoUpload.data.path,
+                thumbnail_url: thumbnailUrl,
                 duration: metadata.duration,
                 size: outputBuffer.length,
                 mime_type: 'video/mp4',
@@ -315,9 +368,14 @@ export async function POST(request: Request) {
 
         if (dbError) {
             console.error('❌ Database insert failed:', dbError)
-            // Clean up the uploaded file if database insert fails
-            console.log('🧹 Cleaning up uploaded file...')
-            await supabase.storage.from('videos').remove([storageData.path])
+            // Clean up the uploaded files if database insert fails
+            console.log('🧹 Cleaning up uploaded files...')
+            await Promise.all([
+                supabase.storage.from('videos').remove([videoUpload.data.path]),
+                supabase.storage
+                    .from('videos')
+                    .remove([thumbnailUpload.data.path]),
+            ])
 
             return NextResponse.json(
                 { error: 'Failed to save video metadata' },
@@ -330,6 +388,7 @@ export async function POST(request: Request) {
             name: videoData.name,
             size: videoData.size,
             duration: videoData.duration,
+            thumbnail: videoData.thumbnail_url,
         })
 
         // Return the video data
