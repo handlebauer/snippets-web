@@ -329,6 +329,16 @@ export function useWebRTC() {
                     mediaRecorder.requestData()
                     mediaRecorder.stop()
                 }
+
+                // Stop all tracks in the stream to end browser's screen sharing
+                stream.getTracks().forEach(track => {
+                    console.log('🛑 Stopping track:', track.kind)
+                    track.stop()
+                })
+
+                // Stop screen sharing after recording is stopped
+                console.log('🛑 Stopping screen sharing due to recording stop')
+                stopSharing()
             }
         },
         [
@@ -339,6 +349,7 @@ export function useWebRTC() {
             state.accessCode,
             videoChannel,
             supabase,
+            stopSharing,
         ],
     )
 
