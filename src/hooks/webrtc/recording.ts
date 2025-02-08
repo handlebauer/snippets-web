@@ -25,6 +25,12 @@ export const handleVideoProcessing = async (
             status: 'processing',
         })
 
+        // Log form data contents before sending
+        console.log('📝 Form data contents:', {
+            video: formData.get('video'),
+            sessionCode: formData.get('sessionCode'),
+        })
+
         const response = await fetch('/api/videos/upload', {
             method: 'POST',
             body: formData,

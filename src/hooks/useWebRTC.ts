@@ -17,6 +17,7 @@ interface WebRTCContext {
     mediaRecorder: MediaRecorder | null
     isRecording: boolean
     candidateQueue: RTCIceCandidate[]
+    pairingCode: string | null
 }
 
 export function useWebRTC() {
@@ -36,6 +37,7 @@ export function useWebRTC() {
         mediaRecorder: null,
         isRecording: false,
         candidateQueue: [],
+        pairingCode: null,
     })
 
     const [supabase] = useState(() => createClient())
@@ -59,6 +61,7 @@ export function useWebRTC() {
             mediaRecorder: null,
             isRecording: false,
             candidateQueue: [],
+            pairingCode: null,
         }
         setState(prev => ({ ...prev, isSharing: false, isRecording: false }))
     }, [supabase])
@@ -76,7 +79,7 @@ export function useWebRTC() {
                 try {
                     const recorder = setupRecorder(
                         stream,
-                        state.pairingCode,
+                        context.current.pairingCode || state.pairingCode,
                         async (formData: FormData) => {
                             await handleVideoProcessing(formData, channel)
                         },
@@ -108,31 +111,98 @@ export function useWebRTC() {
         [state.pairingCode, stopSharing],
     )
 
-    const handlePairDevice = useCallback(async () => {
-        if (state.pairingCode.length !== 6) {
-            setState(prev => ({
-                ...prev,
-                error: 'Please enter a complete pairing code',
-            }))
-            return
-        }
+    const handlePairDevice = useCallback(
+        async (code?: string) => {
+            const pairingCode = code || state.pairingCode
+            console.log('🔑 handlePairDevice called with code:', pairingCode)
+            console.log('📏 Code length:', pairingCode.length)
 
+            if (pairingCode.length !== 6) {
+                console.log(
+                    '❌ Invalid code length, expected 6 but got:',
+                    pairingCode.length,
+                )
+                setState(prev => ({
+                    ...prev,
+                    error: 'Please enter a complete pairing code',
+                }))
+                return
+            }
+
+            setState(prev => ({ ...prev, isPairing: true, error: null }))
+
+            try {
+                console.log(
+                    '📡 Setting up Supabase channel with code:',
+                    pairingCode,
+                )
+                // Only set up the channel for initial pairing
+                const channel = await setupChannel(supabase, pairingCode)
+                console.log('✅ Channel setup complete')
+
+                // Set up recording signal handler
+                console.log('🎥 Setting up recording signal handler')
+                channel.on(
+                    'broadcast',
+                    { event: 'recording' },
+                    ({ payload }) => {
+                        console.log('📼 Received recording signal:', payload)
+                        handleRecordingSignal(payload as RecordingSignal)
+                    },
+                )
+
+                // Store channel in context
+                context.current.channel = channel
+                context.current.pairingCode = pairingCode
+                console.log('💾 Channel and pairing code stored in context')
+
+                // Update state with the code we used
+                setState(prev => ({
+                    ...prev,
+                    isPairing: false,
+                    pairingCode,
+                }))
+            } catch (error) {
+                console.error('❌ Pairing error:', error)
+                setState(prev => ({
+                    ...prev,
+                    error: 'Failed to pair device. Please try again.',
+                }))
+                stopSharing()
+            } finally {
+                setState(prev => ({ ...prev, isPairing: false }))
+            }
+        },
+        [state.pairingCode, supabase, handleRecordingSignal, stopSharing],
+    )
+
+    const startScreenSharing = useCallback(async () => {
         setState(prev => ({ ...prev, isPairing: true, error: null }))
+        console.log('🎬 Starting screen sharing setup')
 
         try {
-            const channel = await setupChannel(supabase, state.pairingCode)
+            const { channel } = context.current
+            if (!channel) {
+                console.error('❌ No channel available for screen sharing')
+                throw new Error('No channel available')
+            }
+            console.log('📡 Using existing channel for WebRTC')
 
             // Get screen sharing stream
+            console.log('🖥️ Requesting screen share permission')
             const stream =
                 await navigator.mediaDevices.getDisplayMedia(MEDIA_CONSTRAINTS)
+            console.log('✅ Screen share permission granted')
 
             // Set up WebRTC connection
+            console.log('🤝 Setting up WebRTC peer connection')
             const { peerConnection, configuredChannel } =
                 await setupPeerConnection(
                     stream,
                     channel,
                     context.current.candidateQueue,
                 )
+            console.log('✅ WebRTC peer connection established')
 
             // Update context
             context.current = {
@@ -141,36 +211,32 @@ export function useWebRTC() {
                 stream,
                 channel: configuredChannel,
             }
-
-            // Set up recording signal handler
-            configuredChannel.on(
-                'broadcast',
-                { event: 'recording' },
-                ({ payload }) => {
-                    handleRecordingSignal(payload as RecordingSignal)
-                },
-            )
+            console.log('💾 Updated context with WebRTC connection')
 
             setState(prev => ({ ...prev, isSharing: true }))
 
             // Handle user stopping screen share
-            stream.getVideoTracks()[0].onended = stopSharing
+            stream.getVideoTracks()[0].onended = () => {
+                console.log('🛑 User stopped screen sharing')
+                stopSharing()
+            }
         } catch (error) {
-            console.error('Pairing error:', error)
+            console.error('❌ Screen sharing error:', error)
             setState(prev => ({
                 ...prev,
-                error: 'Failed to pair device. Please try again.',
+                error: 'Failed to start screen sharing. Please try again.',
             }))
             stopSharing()
         } finally {
             setState(prev => ({ ...prev, isPairing: false }))
         }
-    }, [state.pairingCode, supabase, handleRecordingSignal, stopSharing])
+    }, [stopSharing])
 
     return {
         state,
         setState,
         handlePairDevice,
+        startScreenSharing,
         stopSharing,
     }
 }

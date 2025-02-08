@@ -6,7 +6,7 @@ export const PRESENCE_SYNC_DELAY = 2000
 
 export const CHANNEL_CONFIG = {
     broadcast: { self: false },
-    presence: { key: 'web' },
+    presence: { key: 'presence' },
 } as const
 
 export const MEDIA_CONSTRAINTS = {

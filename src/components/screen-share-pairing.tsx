@@ -9,7 +9,7 @@ import type { ScreenShareState } from '@/types/webrtc'
 interface ScreenSharePairingProps {
     state: ScreenShareState
     onPairingCodeChange: (code: string) => void
-    onPairDevice: () => void
+    onPairDevice: (code: string) => void
 }
 
 export function ScreenSharePairing({
@@ -17,6 +17,20 @@ export function ScreenSharePairing({
     onPairingCodeChange,
     onPairDevice,
 }: ScreenSharePairingProps) {
+    console.log('🎯 Rendering ScreenSharePairing with code:', state.pairingCode)
+
+    const handleCodeChange = (value: string) => {
+        console.log('🔢 OTC input changed, new length:', value.length)
+
+        if (value.length === 6) {
+            console.log('✨ Code complete, triggering pair device')
+            onPairingCodeChange(value)
+            onPairDevice(value)
+        } else {
+            onPairingCodeChange(value)
+        }
+    }
+
     return (
         <>
             <div className="text-center mb-1">
@@ -26,17 +40,11 @@ export function ScreenSharePairing({
                 </p>
             </div>
 
-            <form
-                onSubmit={e => {
-                    e.preventDefault()
-                    onPairDevice()
-                }}
-                className="space-y-4"
-            >
+            <div className="space-y-4">
                 <div className="flex flex-col items-center space-y-4">
                     <InputOTP
                         value={state.pairingCode}
-                        onChange={onPairingCodeChange}
+                        onChange={handleCodeChange}
                         maxLength={6}
                         autoFocus
                     >
@@ -74,18 +82,11 @@ export function ScreenSharePairing({
                             {state.error}
                         </p>
                     )}
+                    {state.isPairing && (
+                        <p className="text-gray-300 text-sm mt-2">Pairing...</p>
+                    )}
                 </div>
-
-                <button
-                    type="submit"
-                    disabled={state.isPairing}
-                    className="w-full bg-[#2A2A2A] hover:bg-[#3A3A3A] text-white font-medium 
-                             py-3 px-4 rounded-lg transition-colors duration-200
-                             disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {state.isPairing ? 'Pairing...' : 'Connect'}
-                </button>
-            </form>
+            </div>
 
             <div className="mt-8 text-center text-sm">
                 <p className="text-gray-400">
