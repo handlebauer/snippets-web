@@ -8,13 +8,13 @@ import type { ScreenShareState } from '@/types/webrtc'
 
 interface ScreenSharePairingProps {
     state: ScreenShareState
-    onAccessCodeChange: (code: string) => void
+    onPairingCodeChange: (code: string) => void
     onPairDevice: () => void
 }
 
 export function ScreenSharePairing({
     state,
-    onAccessCodeChange,
+    onPairingCodeChange,
     onPairDevice,
 }: ScreenSharePairingProps) {
     return (
@@ -35,8 +35,8 @@ export function ScreenSharePairing({
             >
                 <div className="flex flex-col items-center space-y-4">
                     <InputOTP
-                        value={state.accessCode}
-                        onChange={onAccessCodeChange}
+                        value={state.pairingCode}
+                        onChange={onPairingCodeChange}
                         maxLength={6}
                         autoFocus
                     >

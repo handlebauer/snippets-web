@@ -33,6 +33,6 @@ export interface ScreenShareState {
     isSharing: boolean
     isPairing: boolean
     error: string | null
-    accessCode: string
+    pairingCode: string
     isRecording: boolean
 }

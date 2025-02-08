@@ -108,26 +108,18 @@ export async function POST(request: Request) {
 
                                 // Find the mobile client (should be the one with user_id)
                                 const mobileClient = clients.find(
-                                    c => c.user_id,
-                                )
-
-                                // Find the web client that matches our session code
-                                const webClient = clients.find(
                                     c =>
-                                        c.client_type === 'web' &&
-                                        c.session_code === sessionCode,
+                                        c.user_id && c.client_type === 'mobile',
                                 )
 
                                 console.log('👥 Client validation:', {
                                     foundMobile: !!mobileClient,
-                                    foundWeb: !!webClient,
                                     mobileUserId: mobileClient?.user_id,
-                                    webSessionCode: webClient?.session_code,
                                 })
 
-                                if (!mobileClient?.user_id || !webClient) {
+                                if (!mobileClient?.user_id) {
                                     console.error(
-                                        '❌ Missing required clients in session',
+                                        '❌ No authenticated mobile client found in session',
                                     )
                                     resolve({
                                         error: 'No authenticated user found in session',
