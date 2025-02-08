@@ -345,6 +345,21 @@ export async function POST(request: Request) {
         // Get the user ID from the mobile client's presence data
         const userId = presenceData.user_id
 
+        // Get the repository from the recording session
+        const { data: sessionData, error: repoError } = await supabase
+            .from('recording_sessions')
+            .select('linked_repo')
+            .eq('code', sessionCode)
+            .single()
+
+        console.log('🔍 Session code:', sessionCode)
+        console.log('🔍 Repository data:', sessionData)
+
+        if (repoError) {
+            console.warn('⚠️ Failed to fetch repository data:', repoError)
+            // Continue without repository data as it's optional
+        }
+
         // Insert video metadata into the database
         console.log('💾 Saving video metadata to database...')
         const { data: videoData, error: dbError } = await supabase
@@ -359,6 +374,7 @@ export async function POST(request: Request) {
                 size: outputBuffer.length,
                 mime_type: 'video/mp4',
                 trim_end: metadata.duration,
+                linked_repo: sessionData?.linked_repo || null, // Add repository if available
             })
             .select()
             .single()
