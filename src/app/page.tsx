@@ -6,7 +6,7 @@ import { PreRecordView } from '@/components/pre-record-view'
 import { ScreenSharePairing } from '@/components/screen-share-pairing'
 import { createClient } from '@/utils/supabase.client'
 
-import { useWebRTC } from '@/hooks/useWebRTC'
+import { useSession } from '@/hooks/useSession'
 
 interface RepoData {
     name: string
@@ -20,7 +20,7 @@ export default function Home() {
         handlePairDevice,
         startScreenSharing,
         stopSharing,
-    } = useWebRTC()
+    } = useSession()
     const [isLoadingRepo, setIsLoadingRepo] = useState(false)
     const [repoData, setRepoData] = useState<RepoData[] | null>(null)
     const [supabaseClient] = useState(() => createClient())
@@ -87,9 +87,7 @@ export default function Home() {
                                     pairingCode: code,
                                 }))
                             }
-                            onPairDevice={(code: string) => {
-                                handlePairDevice(code)
-                            }}
+                            onPairDevice={handlePairDevice}
                         />
                     )}
                 </div>

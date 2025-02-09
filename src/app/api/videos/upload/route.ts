@@ -43,7 +43,7 @@ export async function POST(request: Request) {
 
         // Get the channel presence info to validate the session
         console.log('🔐 Validating session:', sessionCode)
-        const channel = supabase.channel(`webrtc:${sessionCode}`)
+        const channel = supabase.channel(`session:${sessionCode}`)
 
         type PresenceData = {
             presence_ref: string
