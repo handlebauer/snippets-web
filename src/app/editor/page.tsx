@@ -134,6 +134,7 @@ export default function EditorPage() {
                     onChange={handleChange}
                     className="h-full text-base"
                     placeholder="// Happy coding!"
+                    autoFocus={true}
                     basicSetup={{
                         lineNumbers: true,
                         highlightActiveLineGutter: true,
