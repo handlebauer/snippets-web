@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
@@ -13,14 +13,9 @@ import { useSession } from '@/hooks/useSession'
 interface EditorToolbarProps {
     isRecording: boolean
     onToggleRecording: () => void
-    onFinishRecording: () => void
 }
 
-function EditorToolbar({
-    isRecording,
-    onToggleRecording,
-    onFinishRecording,
-}: EditorToolbarProps) {
+function EditorToolbar({ isRecording, onToggleRecording }: EditorToolbarProps) {
     return (
         <div className="flex items-center justify-between px-4 py-2 bg-[#1E1E1E] border-b border-[#333333]">
             <div className="flex items-center gap-2">
@@ -30,25 +25,17 @@ function EditorToolbar({
             <div className="flex items-center gap-4">
                 <button
                     onClick={onToggleRecording}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
                         isRecording
-                            ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20'
+                            ? 'bg-red-500/10 text-red-500'
                             : 'bg-[#2A2A2A] text-white hover:bg-[#333333]'
                     }`}
                 >
                     <MonitorPlay className="w-4 h-4" />
                     <span className="text-sm font-medium">
-                        {isRecording ? 'Recording' : 'Record'}
+                        {isRecording ? 'Stop Recording' : 'Record'}
                     </span>
                 </button>
-                {isRecording && (
-                    <button
-                        onClick={onFinishRecording}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 text-green-500 hover:bg-green-500/20 transition-colors"
-                    >
-                        <span className="text-sm font-medium">Finish</span>
-                    </button>
-                )}
                 <button className="p-1.5 rounded-lg hover:bg-[#2A2A2A] transition-colors">
                     <Settings className="w-5 h-5 text-[#999999]" />
                 </button>
@@ -60,7 +47,6 @@ function EditorToolbar({
 export default function EditorPage() {
     const router = useRouter()
     const { editor } = useSession()
-    const [isRecording, setIsRecording] = useState(false)
 
     // Send initialization signal when component mounts
     useEffect(() => {
@@ -113,27 +99,20 @@ export default function EditorPage() {
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [router])
 
-    const handleFinishRecording = useCallback(() => {
-        if (!editor) return
-        editor.finishRecording()
-        setIsRecording(false)
-        router.push('/')
-    }, [editor, router])
-
     const handleToggleRecording = useCallback(() => {
         if (!editor) return
-        if (!isRecording) {
+        if (!editor.isRecording) {
             editor.startRecording()
+        } else {
+            editor.finishRecording()
         }
-        setIsRecording(!isRecording)
-    }, [editor, isRecording])
+    }, [editor])
 
     return (
         <div className="h-screen flex flex-col bg-[#1A1A1A]">
             <EditorToolbar
-                isRecording={isRecording}
+                isRecording={editor?.isRecording ?? false}
                 onToggleRecording={handleToggleRecording}
-                onFinishRecording={handleFinishRecording}
             />
             <div className="flex-1 overflow-hidden">
                 <CodeMirror

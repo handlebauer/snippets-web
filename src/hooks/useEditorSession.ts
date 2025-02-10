@@ -32,6 +32,7 @@ interface EditorState {
     isInitialContentSet: boolean
     mode: SessionMode
     isRecording: boolean
+    sessionType: string | null
 }
 
 export function useEditorSession() {
@@ -61,6 +62,7 @@ export function useEditorSession() {
                     isInitialContentSet: false,
                     mode: 'REALTIME',
                     isRecording: false,
+                    sessionType,
                 }
             }
         }
@@ -73,6 +75,7 @@ export function useEditorSession() {
             isInitialContentSet: false,
             mode: 'REALTIME',
             isRecording: false,
+            sessionType: null,
         }
     })
 
@@ -86,10 +89,47 @@ export function useEditorSession() {
         isRecording: state.isRecording,
     })
 
+    // Clean up both editor state and pairing
+    const handleCleanup = useCallback(() => {
+        console.log('🔚 [useEditorSession] Cleaning up session')
+        cleanup()
+        setState({
+            isConnected: false,
+            isPairing: false,
+            error: null,
+            pairingCode: '',
+            content: '',
+            isInitialContentSet: false,
+            mode: 'REALTIME',
+            isRecording: false,
+            sessionType: null,
+        })
+    }, [cleanup])
+
+    // Update session type when pairing succeeds
+    useEffect(() => {
+        if (pairingState.sessionType === 'code_editor') {
+            console.log(
+                '🔄 [useEditorSession] Updating session type from pairing:',
+                {
+                    newSessionType: pairingState.sessionType,
+                    currentSessionType: state.sessionType,
+                },
+            )
+            setState(prev => ({
+                ...prev,
+                sessionType: pairingState.sessionType,
+                pairingCode: pairingState.pairingCode,
+            }))
+        }
+    }, [pairingState.sessionType, pairingState.pairingCode])
+
     // Listen for session type and handle editor-specific setup
     useEffect(() => {
+        const sessionType = pairingState.sessionType || state.sessionType
+
         console.log('🔄 [useEditorSession] Effect running:', {
-            sessionType: pairingState.sessionType,
+            sessionType,
             hasChannel: !!channel,
             isInitialContentSet: state.isInitialContentSet,
             mode: state.mode,
@@ -97,7 +137,7 @@ export function useEditorSession() {
             pairingCode: pairingState.pairingCode,
         })
 
-        if (pairingState.sessionType === 'code_editor' && channel) {
+        if (sessionType === 'code_editor' && channel) {
             console.log(
                 '📝 [useEditorSession] Setting up editor session with code:',
                 pairingState.pairingCode,
@@ -125,7 +165,37 @@ export function useEditorSession() {
                 }))
             }
 
-            // Only subscribe if we haven't received initial content
+            // Handle recording started from mobile
+            const handleRecordingStarted = () => {
+                console.log(
+                    '📱 [useEditorSession] Recording started from mobile',
+                )
+                setState(prev => ({ ...prev, isRecording: true }))
+            }
+
+            // Handle recording finished from mobile
+            const handleRecordingFinished = () => {
+                console.log(
+                    '📱 [useEditorSession] Recording finished from mobile',
+                )
+                setState(prev => ({ ...prev, isRecording: false }))
+                handleCleanup()
+            }
+
+            // Subscribe to recording events first
+            channel.on(
+                'broadcast',
+                { event: 'editor_recording_started' },
+                handleRecordingStarted,
+            )
+
+            channel.on(
+                'broadcast',
+                { event: 'editor_recording_finished' },
+                handleRecordingFinished,
+            )
+
+            // Only subscribe to editor content if we haven't received initial content
             if (!state.isInitialContentSet) {
                 console.log(
                     '🔌 [useEditorSession] Subscribing to editor_content events',
@@ -137,20 +207,29 @@ export function useEditorSession() {
                 )
             }
 
-            // Cleanup function to remove the listener
+            // Cleanup function to remove listeners only when unmounting or session type changes
             return () => {
-                console.log(
-                    '🧹 [useEditorSession] Cleaning up channel subscription',
-                )
-                channel.unsubscribe()
+                // Only cleanup if we're unmounting or changing session type
+                const isUnmounting = !channel
+                const isChangingSessionType =
+                    state.sessionType !== 'code_editor'
+
+                if (isUnmounting || isChangingSessionType) {
+                    console.log(
+                        '🧹 [useEditorSession] Cleaning up channel listeners',
+                        {
+                            reason: isUnmounting
+                                ? 'unmounting'
+                                : 'session type changed',
+                        },
+                    )
+                    channel.unsubscribe()
+                }
             }
         }
-    }, [
-        pairingState.sessionType,
-        pairingState.pairingCode,
-        channel,
-        state.isInitialContentSet,
-    ])
+
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.sessionType, pairingState.pairingCode, channel, handleCleanup])
 
     // Handle content updates and broadcast to channel
     const updateContent = useCallback(
@@ -181,22 +260,6 @@ export function useEditorSession() {
             },
         })
     }, [channel, state.isConnected, state.content])
-
-    // Clean up both editor state and pairing
-    const handleCleanup = useCallback(() => {
-        console.log('🔚 [useEditorSession] Cleaning up session')
-        cleanup()
-        setState({
-            isConnected: false,
-            isPairing: false,
-            error: null,
-            pairingCode: '',
-            content: '',
-            isInitialContentSet: false,
-            mode: 'REALTIME',
-            isRecording: false,
-        })
-    }, [cleanup])
 
     // Signal that recording has started
     const startRecording = useCallback(() => {

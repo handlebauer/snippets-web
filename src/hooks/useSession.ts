@@ -175,6 +175,7 @@ export function useSession() {
             state.sessionType === 'code_editor'
                 ? {
                       content: editorSession.state.content,
+                      isRecording: editorSession.state.isRecording,
                       updateContent: editorSession.updateContent,
                       initialize: editorSession.initialize,
                       finishRecording: editorSession.finishRecording,
