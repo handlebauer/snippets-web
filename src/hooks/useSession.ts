@@ -176,6 +176,7 @@ export function useSession() {
                 ? {
                       content: editorSession.state.content,
                       updateContent: editorSession.updateContent,
+                      initialize: editorSession.initialize,
                   }
                 : null,
         screen:

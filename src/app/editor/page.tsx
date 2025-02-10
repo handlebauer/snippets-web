@@ -66,6 +66,12 @@ export default function EditorPage() {
     const [mode, setMode] = useState('REALTIME')
     const [isRecording, setIsRecording] = useState(false)
 
+    // Send initialization signal when component mounts
+    useEffect(() => {
+        if (!editor) return
+        editor.initialize()
+    }, [editor])
+
     const handleChange = useCallback(
         (value: string, viewUpdate: ViewUpdate) => {
             if (!editor) return
@@ -121,12 +127,13 @@ export default function EditorPage() {
             />
             <div className="flex-1 overflow-hidden">
                 <CodeMirror
-                    value={editor?.content || '// Start coding here...'}
+                    value={editor?.content || ''}
                     height="100%"
                     theme={oneDark}
                     extensions={[javascript({ jsx: true })]}
                     onChange={handleChange}
                     className="h-full text-base"
+                    placeholder="// Happy coding!"
                     basicSetup={{
                         lineNumbers: true,
                         highlightActiveLineGutter: true,

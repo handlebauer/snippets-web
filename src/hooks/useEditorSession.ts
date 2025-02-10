@@ -163,6 +163,21 @@ export function useEditorSession() {
         [queueEvent],
     )
 
+    // Initialize editor and broadcast ready state
+    const initialize = useCallback(() => {
+        if (!channel || !state.isConnected) return
+
+        console.log('🎬 [useEditorSession] Initializing editor')
+        channel.send({
+            type: 'broadcast',
+            event: 'editor_initialized',
+            payload: {
+                timestamp: Date.now(),
+                content: state.content,
+            },
+        })
+    }, [channel, state.isConnected, state.content])
+
     // Clean up both editor state and pairing
     const handleCleanup = useCallback(() => {
         console.log('🔚 [useEditorSession] Cleaning up session')
@@ -182,6 +197,7 @@ export function useEditorSession() {
         state,
         handlePairDevice,
         updateContent,
+        initialize,
         cleanup: handleCleanup,
         pairingState,
     }
