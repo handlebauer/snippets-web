@@ -46,7 +46,7 @@ export default function Home() {
     }, [state.sessionType, state.isConnected, state.pairingCode])
 
     useEffect(() => {
-        if (state.pairingCode) {
+        if (state.pairingCode?.length === 6) {
             const fetchRepoData = async () => {
                 setIsLoadingRepo(true)
                 try {

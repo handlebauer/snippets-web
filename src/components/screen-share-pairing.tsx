@@ -20,14 +20,15 @@ export function ScreenSharePairing({
     console.log('🎯 Rendering ScreenSharePairing with code:', state.pairingCode)
 
     const handleCodeChange = (value: string) => {
-        console.log('🔢 OTC input changed, new length:', value.length)
+        const upperValue = value.toUpperCase()
+        console.log('🔢 OTC input changed, new length:', upperValue.length)
 
-        if (value.length === 6) {
+        if (upperValue.length === 6) {
             console.log('✨ Code complete, triggering pair device')
-            onPairingCodeChange(value)
-            onPairDevice(value)
+            onPairingCodeChange(upperValue)
+            onPairDevice(upperValue)
         } else {
-            onPairingCodeChange(value)
+            onPairingCodeChange(upperValue)
         }
     }
 
