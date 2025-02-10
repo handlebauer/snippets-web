@@ -177,6 +177,8 @@ export function useSession() {
                       content: editorSession.state.content,
                       updateContent: editorSession.updateContent,
                       initialize: editorSession.initialize,
+                      finishRecording: editorSession.finishRecording,
+                      startRecording: editorSession.startRecording,
                   }
                 : null,
         screen:

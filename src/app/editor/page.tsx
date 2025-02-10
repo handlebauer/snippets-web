@@ -11,17 +11,15 @@ import { Code, MonitorPlay, Settings } from 'lucide-react'
 import { useSession } from '@/hooks/useSession'
 
 interface EditorToolbarProps {
-    mode: string
-    onModeChange: (mode: string) => void
     isRecording: boolean
     onToggleRecording: () => void
+    onFinishRecording: () => void
 }
 
 function EditorToolbar({
-    mode,
-    onModeChange,
     isRecording,
     onToggleRecording,
+    onFinishRecording,
 }: EditorToolbarProps) {
     return (
         <div className="flex items-center justify-between px-4 py-2 bg-[#1E1E1E] border-b border-[#333333]">
@@ -30,15 +28,6 @@ function EditorToolbar({
                 <span className="text-white font-medium">Code Editor</span>
             </div>
             <div className="flex items-center gap-4">
-                <select
-                    value={mode}
-                    onChange={e => onModeChange(e.target.value)}
-                    className="bg-[#2A2A2A] text-white text-sm rounded-lg px-3 py-1.5 border border-[#333333] focus:outline-none focus:ring-2 focus:ring-[#0A84FF]"
-                >
-                    <option value="REALTIME">Realtime</option>
-                    <option value="PLAYBACK">Playback</option>
-                    <option value="ARCHIVE">Archive</option>
-                </select>
                 <button
                     onClick={onToggleRecording}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-colors ${
@@ -52,6 +41,14 @@ function EditorToolbar({
                         {isRecording ? 'Recording' : 'Record'}
                     </span>
                 </button>
+                {isRecording && (
+                    <button
+                        onClick={onFinishRecording}
+                        className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-green-500/10 text-green-500 hover:bg-green-500/20 transition-colors"
+                    >
+                        <span className="text-sm font-medium">Finish</span>
+                    </button>
+                )}
                 <button className="p-1.5 rounded-lg hover:bg-[#2A2A2A] transition-colors">
                     <Settings className="w-5 h-5 text-[#999999]" />
                 </button>
@@ -63,7 +60,6 @@ function EditorToolbar({
 export default function EditorPage() {
     const router = useRouter()
     const { editor } = useSession()
-    const [mode, setMode] = useState('REALTIME')
     const [isRecording, setIsRecording] = useState(false)
 
     // Send initialization signal when component mounts
@@ -117,13 +113,27 @@ export default function EditorPage() {
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [router])
 
+    const handleFinishRecording = useCallback(() => {
+        if (!editor) return
+        editor.finishRecording()
+        setIsRecording(false)
+        router.push('/')
+    }, [editor, router])
+
+    const handleToggleRecording = useCallback(() => {
+        if (!editor) return
+        if (!isRecording) {
+            editor.startRecording()
+        }
+        setIsRecording(!isRecording)
+    }, [editor, isRecording])
+
     return (
         <div className="h-screen flex flex-col bg-[#1A1A1A]">
             <EditorToolbar
-                mode={mode}
-                onModeChange={setMode}
                 isRecording={isRecording}
-                onToggleRecording={() => setIsRecording(!isRecording)}
+                onToggleRecording={handleToggleRecording}
+                onFinishRecording={handleFinishRecording}
             />
             <div className="flex-1 overflow-hidden">
                 <CodeMirror

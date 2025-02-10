@@ -31,6 +31,7 @@ interface EditorState {
     content: string
     isInitialContentSet: boolean
     mode: SessionMode
+    isRecording: boolean
 }
 
 export function useEditorSession() {
@@ -59,6 +60,7 @@ export function useEditorSession() {
                     content: '',
                     isInitialContentSet: false,
                     mode: 'REALTIME',
+                    isRecording: false,
                 }
             }
         }
@@ -70,6 +72,7 @@ export function useEditorSession() {
             content: '',
             isInitialContentSet: false,
             mode: 'REALTIME',
+            isRecording: false,
         }
     })
 
@@ -80,6 +83,7 @@ export function useEditorSession() {
         pairingCode: state.pairingCode,
         content: state.content,
         mode: state.mode,
+        isRecording: state.isRecording,
     })
 
     // Listen for session type and handle editor-specific setup
@@ -190,8 +194,42 @@ export function useEditorSession() {
             content: '',
             isInitialContentSet: false,
             mode: 'REALTIME',
+            isRecording: false,
         })
     }, [cleanup])
+
+    // Signal that recording has started
+    const startRecording = useCallback(() => {
+        if (!channel || !state.isConnected) return
+
+        console.log('🎥 [useEditorSession] Starting recording')
+        setState(prev => ({ ...prev, isRecording: true }))
+        channel.send({
+            type: 'broadcast',
+            event: 'editor_recording_started',
+            payload: {
+                timestamp: Date.now(),
+                content: state.content,
+            },
+        })
+    }, [channel, state.isConnected, state.content])
+
+    // Signal that recording is finished
+    const finishRecording = useCallback(() => {
+        if (!channel || !state.isConnected) return
+
+        console.log('🎬 [useEditorSession] Finishing recording')
+        setState(prev => ({ ...prev, isRecording: false }))
+        channel.send({
+            type: 'broadcast',
+            event: 'editor_recording_finished',
+            payload: {
+                timestamp: Date.now(),
+                content: state.content,
+            },
+        })
+        handleCleanup()
+    }, [channel, state.isConnected, state.content, handleCleanup])
 
     return {
         state,
@@ -199,6 +237,8 @@ export function useEditorSession() {
         updateContent,
         initialize,
         cleanup: handleCleanup,
+        finishRecording,
+        startRecording,
         pairingState,
     }
 }

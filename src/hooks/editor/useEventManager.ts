@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { createClient } from '@/utils/supabase.client'
 
 import type { Database } from '@/lib/supabase.types'
@@ -73,6 +73,7 @@ interface EventManagerConfig {
     pairingCode: string
     content: string
     mode: SessionMode
+    isRecording: boolean
 }
 
 export function useEventManager({
@@ -81,6 +82,7 @@ export function useEventManager({
     pairingCode,
     content,
     mode,
+    isRecording,
 }: EventManagerConfig) {
     // Refs for event batching
     const eventBatchRef = useRef<EditorEvent[]>([])
@@ -171,6 +173,14 @@ export function useEventManager({
 
     const sendBatch = useCallback(
         async (batch: EditorBatch) => {
+            // Early return if not recording - we shouldn't even get here
+            if (!isRecording) {
+                console.log(
+                    '⏸️ [useEventManager] Skipping batch: not recording',
+                )
+                return
+            }
+
             if (!channel || !isConnected) {
                 console.warn(
                     '🔌 [useEventManager] Cannot send batch: not connected',
@@ -186,10 +196,11 @@ export function useEventManager({
                 eventCount: batch.events.length,
                 timeSpanMs: batch.timestamp_end - batch.timestamp_start,
                 pairingCode,
+                isRecording,
             })
 
             try {
-                // Send batch to connected mobile client for real-time sync
+                // Send batch to connected mobile client
                 channel.send({
                     type: 'broadcast',
                     event: 'editor_batch',
@@ -198,15 +209,12 @@ export function useEventManager({
 
                 console.log('📱 [useEventManager] Batch sent to mobile client')
 
-                // Store batch in database using the pairing code as auth token
-                console.log(
-                    '💾 [useEventManager] Attempting to store batch in database:',
-                    {
-                        pairing_code: pairingCode,
-                        event_count: batch.events.length,
-                        first_event_type: batch.events[0].type,
-                    },
-                )
+                // Store batch in database (we know we're recording at this point)
+                console.log('💾 [useEventManager] Storing batch in database:', {
+                    pairing_code: pairingCode,
+                    event_count: batch.events.length,
+                    first_event_type: batch.events[0].type,
+                })
 
                 const { data, error } = await createClient().rpc(
                     'store_editor_event_batch',
@@ -252,7 +260,7 @@ export function useEventManager({
                 )
             }
         },
-        [channel, isConnected, pairingCode],
+        [channel, isConnected, pairingCode, isRecording],
     )
 
     const shouldCreateSnapshot = useCallback((event: EditorEvent): boolean => {
@@ -317,6 +325,14 @@ export function useEventManager({
                 return
             }
 
+            // Only create snapshots if recording
+            if (!isRecording) {
+                console.log(
+                    '⏸️ [useEventManager] Skipping snapshot: not recording',
+                )
+                return
+            }
+
             console.log('📸 [useEventManager] Creating snapshot:', {
                 eventIndex,
                 contentLength: content.length,
@@ -375,11 +391,57 @@ export function useEventManager({
                 })
             }
         },
-        [pairingCode, isConnected, content],
+        [pairingCode, isConnected, content, isRecording],
     )
+
+    // Reset all event tracking state
+    const resetEventTracking = useCallback(() => {
+        eventBatchRef.current = []
+        totalEventsRef.current = 0
+        lastSnapshotTimeRef.current = Date.now()
+        changesSinceSnapshotRef.current = 0
+        if (batchTimeoutRef.current) {
+            clearTimeout(batchTimeoutRef.current)
+            batchTimeoutRef.current = null
+        }
+    }, [])
+
+    // Watch recording state changes to reset tracking
+    useEffect(() => {
+        if (isRecording) {
+            console.log(
+                '🎥 [useEventManager] Recording started, initializing event tracking',
+            )
+            resetEventTracking()
+        } else {
+            console.log(
+                '⏹️ [useEventManager] Recording stopped, clearing event tracking',
+            )
+            resetEventTracking()
+        }
+    }, [isRecording, resetEventTracking])
 
     const queueEvent = useCallback(
         (event: EditorEvent) => {
+            // If not recording, only sync content if channel is available
+            if (!isRecording) {
+                if (channel && isConnected) {
+                    console.log(
+                        '🔄 [useEventManager] Syncing content (not recording)',
+                    )
+                    channel.send({
+                        type: 'broadcast',
+                        event: 'editor_content',
+                        payload: {
+                            content,
+                            timestamp: Date.now(),
+                        },
+                    })
+                }
+                return
+            }
+
+            // Everything below this point only happens if we are recording
             console.log('📥 [useEventManager] Queueing event:', {
                 type: event.type,
                 timestamp: new Date(event.timestamp).toISOString(),
@@ -425,6 +487,10 @@ export function useEventManager({
             }
         },
         [
+            isRecording,
+            channel,
+            isConnected,
+            content,
             shouldCreateBatch,
             createBatch,
             sendBatch,
