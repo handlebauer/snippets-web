@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { ActiveScreenShare } from '@/components/active-screen-share'
 import { PreRecordView } from '@/components/pre-record-view'
 import { ScreenSharePairing } from '@/components/screen-share-pairing'
@@ -20,10 +21,20 @@ export default function Home() {
         handlePairDevice,
         startScreenSharing,
         stopSharing,
+        cleanup,
     } = useSession()
     const [isLoadingRepo, setIsLoadingRepo] = useState(false)
     const [repoData, setRepoData] = useState<RepoData[] | null>(null)
     const [supabaseClient] = useState(() => createClient())
+    const router = useRouter()
+
+    // Clear session state on home page mount only
+    useEffect(() => {
+        console.log('🧹 [Home] Cleaning up session state')
+        localStorage.removeItem('editorSession')
+        cleanup()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []) // Empty dependency array = only run on mount
 
     // Add debug logging for session type changes
     useEffect(() => {
@@ -49,8 +60,11 @@ export default function Home() {
                             ...prev,
                             error: 'Failed to fetch repositories',
                         }))
-                    } else {
-                        setRepoData(data.repos)
+                    } else if (data) {
+                        const repoData = (
+                            data as unknown as { repos: RepoData[] }
+                        ).repos
+                        setRepoData(repoData)
                     }
                 } catch (error) {
                     console.error('Error fetching repos:', error)
@@ -101,7 +115,7 @@ export default function Home() {
                     onSelectScreen={startScreenSharing}
                     onStartEditor={async () => {
                         console.log('🚀 Starting editor session')
-                        window.location.href = '/editor'
+                        router.push(`/editor?code=${state.pairingCode}`)
                     }}
                     statusMessage={state.error || null}
                     selectedScreenName={null}

@@ -1,5 +1,7 @@
 import { Geist, Geist_Mono } from 'next/font/google'
 
+import { RootLayoutClient } from './layout.client'
+
 import type { Metadata } from 'next'
 
 import './globals.css'
@@ -13,6 +15,7 @@ const geistMono = Geist_Mono({
     variable: '--font-geist-mono',
     subsets: ['latin'],
 })
+
 export const metadata: Metadata = {
     title: 'Screen Sharing Pair',
     description: 'Pair your device with a 6-digit access code',
@@ -28,7 +31,7 @@ export default function RootLayout({
             <body
                 className={`${geistSans.variable} ${geistMono.variable} antialiased`}
             >
-                {children}
+                <RootLayoutClient>{children}</RootLayoutClient>
             </body>
         </html>
     )

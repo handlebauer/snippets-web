@@ -1,12 +1,10 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { createClient } from '@/utils/supabase.client'
 
-import { cleanupChannel, setupChannel } from './session/channel'
+import { useChannel } from './session/ChannelContext'
 
 import type { Database } from '@/lib/supabase.types'
-import type { RealtimeChannel } from '@supabase/supabase-js'
 
 type RecordingSessionType =
     Database['public']['Enums']['recording_session_type']
@@ -28,8 +26,7 @@ export function usePairing() {
         isConnected: false,
     })
 
-    const [supabase] = useState(() => createClient())
-    const [channel, setChannel] = useState<RealtimeChannel | null>(null)
+    const { connect, disconnect, getChannel } = useChannel()
 
     const handlePairDevice = useCallback(
         async (code: string) => {
@@ -44,17 +41,22 @@ export function usePairing() {
             setState(prev => ({ ...prev, isPairing: true, error: null }))
 
             try {
-                const newChannel = await setupChannel(supabase, code)
+                await connect(code)
+                const channel = getChannel()
 
-                // Set up session type listener before subscribing
-                newChannel.on(
+                if (!channel) {
+                    throw new Error('Channel not established')
+                }
+
+                // Set up session type listener
+                channel.on(
                     'broadcast',
                     { event: 'session_type' },
                     ({ payload }) => {
                         console.log('📢 Received session type signal:', {
                             type: payload.type,
-                            channel: newChannel.topic,
-                            state: newChannel.state,
+                            channel: channel.topic,
+                            state: channel.state,
                         })
                         setState(prev => ({
                             ...prev,
@@ -64,7 +66,6 @@ export function usePairing() {
                     },
                 )
 
-                setChannel(newChannel)
                 setState(prev => ({
                     ...prev,
                     pairingCode: code,
@@ -82,13 +83,11 @@ export function usePairing() {
                 }))
             }
         },
-        [supabase],
+        [connect, getChannel],
     )
 
     const cleanup = useCallback(() => {
-        if (channel) {
-            cleanupChannel(supabase, channel)
-        }
+        disconnect()
         setState({
             isPairing: false,
             error: null,
@@ -96,11 +95,11 @@ export function usePairing() {
             sessionType: null,
             isConnected: false,
         })
-    }, [channel, supabase])
+    }, [disconnect])
 
     return {
         state,
-        channel,
+        channel: getChannel(),
         handlePairDevice,
         cleanup,
     }

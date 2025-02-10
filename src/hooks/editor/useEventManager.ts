@@ -3,7 +3,11 @@
 import { useCallback, useRef } from 'react'
 import { createClient } from '@/utils/supabase.client'
 
+import type { Database } from '@/lib/supabase.types'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+
+type Json =
+    Database['public']['Tables']['editor_event_batches']['Row']['events']
 
 // Constants for different modes
 const BATCH_THRESHOLDS = {
@@ -92,23 +96,63 @@ export function useEventManager({
         (event: EditorEvent): boolean => {
             const thresholds = BATCH_THRESHOLDS[mode]
             const timeSinceLastBatch = Date.now() - lastBatchTimeRef.current
+            const currentBatchSize = eventBatchRef.current.length
+
+            console.log('🤔 [useEventManager] Evaluating batch creation:', {
+                mode,
+                currentBatchSize,
+                timeSinceLastBatch,
+                eventThreshold: thresholds.EVENTS,
+                timeThreshold: thresholds.TIME_MS,
+                isSignificantEvent: event.metadata?.isSignificant,
+            })
 
             // Always batch significant events immediately
             if (event.metadata?.isSignificant) {
+                console.log(
+                    '📢 [useEventManager] Creating batch for significant event',
+                )
                 return true
             }
 
             // Check time and event count thresholds based on mode
-            return (
-                eventBatchRef.current.length >= thresholds.EVENTS ||
+            const shouldCreate =
+                currentBatchSize >= thresholds.EVENTS ||
                 timeSinceLastBatch >= thresholds.TIME_MS
-            )
+
+            if (shouldCreate) {
+                console.log('⏰ [useEventManager] Batch threshold reached:', {
+                    reason:
+                        currentBatchSize >= thresholds.EVENTS
+                            ? 'event count'
+                            : 'time elapsed',
+                })
+            }
+
+            return shouldCreate
         },
         [mode],
     )
 
     const createBatch = useCallback((): EditorBatch | null => {
-        if (eventBatchRef.current.length === 0) return null
+        if (eventBatchRef.current.length === 0) {
+            console.log(
+                '⚠️ [useEventManager] Attempted to create batch with no events',
+            )
+            return null
+        }
+
+        console.log('📦 [useEventManager] Creating batch:', {
+            eventCount: eventBatchRef.current.length,
+            firstEventTime: new Date(
+                eventBatchRef.current[0].timestamp,
+            ).toISOString(),
+            lastEventTime: new Date(
+                eventBatchRef.current[
+                    eventBatchRef.current.length - 1
+                ].timestamp,
+            ).toISOString(),
+        })
 
         const batch = {
             timestamp_start: eventBatchRef.current[0].timestamp,
@@ -127,7 +171,22 @@ export function useEventManager({
 
     const sendBatch = useCallback(
         async (batch: EditorBatch) => {
-            if (!channel || !isConnected) return
+            if (!channel || !isConnected) {
+                console.warn(
+                    '🔌 [useEventManager] Cannot send batch: not connected',
+                    {
+                        hasChannel: !!channel,
+                        isConnected,
+                    },
+                )
+                return
+            }
+
+            console.log('📤 [useEventManager] Sending batch:', {
+                eventCount: batch.events.length,
+                timeSpanMs: batch.timestamp_end - batch.timestamp_start,
+                pairingCode,
+            })
 
             try {
                 // Send batch to connected mobile client for real-time sync
@@ -137,23 +196,60 @@ export function useEventManager({
                     payload: batch,
                 })
 
+                console.log('📱 [useEventManager] Batch sent to mobile client')
+
                 // Store batch in database using the pairing code as auth token
-                const { error } = await createClient().rpc(
+                console.log(
+                    '💾 [useEventManager] Attempting to store batch in database:',
+                    {
+                        pairing_code: pairingCode,
+                        event_count: batch.events.length,
+                        first_event_type: batch.events[0].type,
+                    },
+                )
+
+                const { data, error } = await createClient().rpc(
                     'store_editor_event_batch',
                     {
                         pairing_code: pairingCode,
                         timestamp_start: batch.timestamp_start,
                         timestamp_end: batch.timestamp_end,
-                        events: batch.events,
+                        events: batch.events as unknown as Json,
                         event_count: batch.events.length,
                     },
                 )
 
                 if (error) {
-                    console.error('Failed to store event batch:', error)
+                    console.error(
+                        '❌ [useEventManager] Failed to store batch:',
+                        {
+                            error,
+                            eventCount: batch.events.length,
+                            errorCode: error.code,
+                            errorMessage: error.message,
+                            details: error.details,
+                        },
+                    )
+                } else {
+                    console.log(
+                        '💾 [useEventManager] Batch stored in database:',
+                        {
+                            success: true,
+                            data,
+                            eventCount: batch.events.length,
+                            timeSpanMs:
+                                batch.timestamp_end - batch.timestamp_start,
+                        },
+                    )
                 }
             } catch (err) {
-                console.error('Error sending/storing batch:', err)
+                console.error(
+                    '💥 [useEventManager] Error in batch processing:',
+                    {
+                        error: err,
+                        eventCount: batch.events.length,
+                    },
+                )
             }
         },
         [channel, isConnected, pairingCode],
@@ -163,23 +259,46 @@ export function useEventManager({
         const timeSinceLastSnapshot = Date.now() - lastSnapshotTimeRef.current
         const eventsSinceLastSnapshot =
             totalEventsRef.current % SNAPSHOT_THRESHOLDS.EVENTS
+        const changes = changesSinceSnapshotRef.current
+
+        console.log('📸 [useEventManager] Evaluating snapshot creation:', {
+            timeSinceLastSnapshot,
+            eventsSinceLastSnapshot,
+            changesSinceSnapshot: changes,
+            minChangesRequired: SNAPSHOT_THRESHOLDS.MIN_CHANGES,
+            isSignificantEvent: event.metadata?.isSignificant,
+        })
 
         // Always create snapshot for significant events if we have minimum changes
         if (
             event.metadata?.isSignificant &&
-            changesSinceSnapshotRef.current >= SNAPSHOT_THRESHOLDS.MIN_CHANGES
+            changes >= SNAPSHOT_THRESHOLDS.MIN_CHANGES
         ) {
+            console.log(
+                '🎯 [useEventManager] Creating snapshot for significant event',
+            )
             return true
         }
 
         // Only consider time/event thresholds if we have minimum changes
-        if (
-            changesSinceSnapshotRef.current >= SNAPSHOT_THRESHOLDS.MIN_CHANGES
-        ) {
-            return (
+        if (changes >= SNAPSHOT_THRESHOLDS.MIN_CHANGES) {
+            const shouldCreate =
                 timeSinceLastSnapshot >= SNAPSHOT_THRESHOLDS.TIME_MS ||
                 eventsSinceLastSnapshot === 0
-            )
+
+            if (shouldCreate) {
+                console.log(
+                    '⏱️ [useEventManager] Snapshot threshold reached:',
+                    {
+                        reason:
+                            timeSinceLastSnapshot >= SNAPSHOT_THRESHOLDS.TIME_MS
+                                ? 'time elapsed'
+                                : 'event count',
+                    },
+                )
+            }
+
+            return shouldCreate
         }
 
         return false
@@ -187,7 +306,22 @@ export function useEventManager({
 
     const createSnapshot = useCallback(
         async (eventIndex: number): Promise<void> => {
-            if (!pairingCode || !isConnected) return
+            if (!pairingCode || !isConnected) {
+                console.warn(
+                    '🔌 [useEventManager] Cannot create snapshot: not connected',
+                    {
+                        hasPairingCode: !!pairingCode,
+                        isConnected,
+                    },
+                )
+                return
+            }
+
+            console.log('📸 [useEventManager] Creating snapshot:', {
+                eventIndex,
+                contentLength: content.length,
+                changesSinceLastSnapshot: changesSinceSnapshotRef.current,
+            })
 
             try {
                 const snapshot: EditorSnapshot = {
@@ -210,19 +344,35 @@ export function useEventManager({
                         event_index: snapshot.event_index,
                         timestamp: snapshot.timestamp,
                         content: snapshot.content,
-                        metadata: snapshot.metadata,
+                        metadata: snapshot.metadata as Json,
                     },
                 )
 
                 if (error) {
-                    console.error('Failed to store snapshot:', error)
+                    console.error(
+                        '❌ [useEventManager] Failed to store snapshot:',
+                        {
+                            error,
+                            eventIndex,
+                        },
+                    )
                 } else {
+                    console.log(
+                        '💾 [useEventManager] Snapshot stored successfully:',
+                        {
+                            eventIndex,
+                            isKeyFrame: snapshot.metadata?.isKeyFrame,
+                        },
+                    )
                     // Reset tracking counters
                     lastSnapshotTimeRef.current = Date.now()
                     changesSinceSnapshotRef.current = 0
                 }
             } catch (err) {
-                console.error('Error creating snapshot:', err)
+                console.error('💥 [useEventManager] Error creating snapshot:', {
+                    error: err,
+                    eventIndex,
+                })
             }
         },
         [pairingCode, isConnected, content],
@@ -230,11 +380,25 @@ export function useEventManager({
 
     const queueEvent = useCallback(
         (event: EditorEvent) => {
+            console.log('📥 [useEventManager] Queueing event:', {
+                type: event.type,
+                timestamp: new Date(event.timestamp).toISOString(),
+                changeSize: event.metadata?.changeSize,
+                isSignificant: event.metadata?.isSignificant,
+            })
+
             // Update tracking counters
             totalEventsRef.current++
-            changesSinceSnapshotRef.current += Math.abs(
+            const charChanges = Math.abs(
                 (event.text?.length || 0) - (event.removed?.length || 0),
             )
+            changesSinceSnapshotRef.current += charChanges
+
+            console.log('📊 [useEventManager] Updated counters:', {
+                totalEvents: totalEventsRef.current,
+                changesSinceSnapshot: changesSinceSnapshotRef.current,
+                charChanges,
+            })
 
             eventBatchRef.current.push(event)
 
@@ -254,6 +418,7 @@ export function useEventManager({
             } else {
                 // Set a new timeout for the current mode's time threshold
                 batchTimeoutRef.current = setTimeout(() => {
+                    console.log('⏰ [useEventManager] Batch timeout triggered')
                     const batch = createBatch()
                     if (batch) sendBatch(batch)
                 }, BATCH_THRESHOLDS[mode].TIME_MS)

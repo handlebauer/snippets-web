@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/utils/supabase.client'
 import { ArrowLeftRight, Check, Code, Monitor, Smartphone } from 'lucide-react'
 
@@ -32,6 +33,7 @@ export function PreRecordView({
     repositories,
     sessionType,
 }: PreRecordViewProps) {
+    const router = useRouter()
     const [selectedRepo, setSelectedRepo] = useState<string>('')
     const [error, setError] = useState<string | null>(null)
     const [supabaseClient] = useState(() => createClient())
@@ -59,7 +61,17 @@ export function PreRecordView({
         if (updateError) {
             console.error('Failed to update recording session:', updateError)
             setError('Failed to update repository selection')
+            return
         }
+
+        // Store session info in localStorage for persistence
+        const sessionInfo = {
+            pairingCode,
+            sessionType,
+            repository: repo,
+            timestamp: Date.now(),
+        }
+        localStorage.setItem('editorSession', JSON.stringify(sessionInfo))
 
         console.log('Updated recording session:', {
             code: pairingCode,
@@ -137,11 +149,21 @@ export function PreRecordView({
                 </div>
 
                 <button
-                    onClick={
-                        sessionType === 'code_editor'
-                            ? onStartEditor
-                            : onSelectScreen
-                    }
+                    onClick={async () => {
+                        if (sessionType === 'code_editor') {
+                            console.log(
+                                '🚀 [PreRecordView] Navigating to editor with session:',
+                                {
+                                    pairingCode,
+                                    sessionType,
+                                    repository: selectedRepo,
+                                },
+                            )
+                            router.push(`/editor?code=${pairingCode}`)
+                        } else {
+                            await onSelectScreen()
+                        }
+                    }}
                     disabled={sessionType === 'code_editor' && !selectedRepo}
                     className="w-full bg-[#2A2A2A] hover:bg-[#3A3A3A] text-white font-medium 
                              py-3 px-4 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"

@@ -273,6 +273,26 @@ export type Database = {
                 }
                 Returns: Json
             }
+            store_editor_event_batch: {
+                Args: {
+                    pairing_code: string
+                    timestamp_start: number
+                    timestamp_end: number
+                    events: Json
+                    event_count: number
+                }
+                Returns: Json
+            }
+            store_editor_snapshot: {
+                Args: {
+                    pairing_code: string
+                    event_index: number
+                    timestamp: number
+                    content: string
+                    metadata: Json
+                }
+                Returns: Json
+            }
             update_session_repository: {
                 Args: {
                     pairing_code: string
