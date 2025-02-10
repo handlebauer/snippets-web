@@ -245,5 +245,6 @@ export function useScreenSession() {
         startSharing,
         stopSharing,
         cleanup,
+        pairingState,
     }
 }

@@ -25,6 +25,15 @@ export default function Home() {
     const [repoData, setRepoData] = useState<RepoData[] | null>(null)
     const [supabaseClient] = useState(() => createClient())
 
+    // Add debug logging for session type changes
+    useEffect(() => {
+        console.log('🔄 [Home] Session state updated:', {
+            sessionType: state.sessionType,
+            isConnected: state.isConnected,
+            pairingCode: state.pairingCode,
+        })
+    }, [state.sessionType, state.isConnected, state.pairingCode])
+
     useEffect(() => {
         if (state.pairingCode) {
             const fetchRepoData = async () => {
@@ -57,39 +66,70 @@ export default function Home() {
         }
     }, [state.pairingCode, setState, supabaseClient])
 
+    // Add debug logging for render conditions
+    const renderContent = () => {
+        console.log('🎯 [Home] Rendering with state:', {
+            isSharing: state.isSharing,
+            isLoadingRepo,
+            hasRepoData: !!repoData,
+            sessionType: state.sessionType,
+        })
+
+        if (state.isSharing) {
+            return <ActiveScreenShare onStopSharing={stopSharing} />
+        }
+
+        if (isLoadingRepo) {
+            return (
+                <div className="text-white text-center">
+                    <div className="mb-4">
+                        Loading session and repository data...
+                    </div>
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto"></div>
+                </div>
+            )
+        }
+
+        if (repoData) {
+            console.log('📝 [Home] Rendering PreRecordView with:', {
+                sessionType: state.sessionType,
+                pairingCode: state.pairingCode,
+            })
+            return (
+                <PreRecordView
+                    pairingCode={state.pairingCode}
+                    onSelectScreen={startScreenSharing}
+                    onStartEditor={async () => {
+                        console.log('🚀 Starting editor session')
+                        window.location.href = '/editor'
+                    }}
+                    statusMessage={state.error || null}
+                    selectedScreenName={null}
+                    repositories={repoData}
+                    sessionType={state.sessionType || undefined}
+                />
+            )
+        }
+
+        return (
+            <ScreenSharePairing
+                state={state}
+                onPairingCodeChange={code =>
+                    setState(prev => ({
+                        ...prev,
+                        pairingCode: code,
+                    }))
+                }
+                onPairDevice={handlePairDevice}
+            />
+        )
+    }
+
     return (
         <div className="min-h-screen bg-[#121212] flex flex-col items-center justify-center">
             <main className="w-full max-w-md flex flex-col items-center p-8">
                 <div className="w-full bg-[#1E1E1E] rounded-2xl p-8">
-                    {state.isSharing ? (
-                        <ActiveScreenShare onStopSharing={stopSharing} />
-                    ) : isLoadingRepo ? (
-                        <div className="text-white text-center">
-                            <div className="mb-4">
-                                Loading session and repository data...
-                            </div>
-                            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto"></div>
-                        </div>
-                    ) : repoData ? (
-                        <PreRecordView
-                            pairingCode={state.pairingCode}
-                            onSelectScreen={startScreenSharing}
-                            statusMessage="Select a repository and start recording when ready"
-                            selectedScreenName={null}
-                            repositories={repoData}
-                        />
-                    ) : (
-                        <ScreenSharePairing
-                            state={state}
-                            onPairingCodeChange={code =>
-                                setState(prev => ({
-                                    ...prev,
-                                    pairingCode: code,
-                                }))
-                            }
-                            onPairDevice={handlePairDevice}
-                        />
-                    )}
+                    {renderContent()}
                 </div>
             </main>
         </div>

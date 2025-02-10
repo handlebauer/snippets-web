@@ -36,6 +36,24 @@ export function useSession() {
     const editorSession = useEditorSession()
     const screenSession = useScreenSession()
 
+    // Handle session type from pairing state
+    useEffect(() => {
+        if (editorSession.pairingState?.sessionType) {
+            setState(prev => ({
+                ...prev,
+                sessionType: editorSession.pairingState.sessionType,
+            }))
+        } else if (screenSession.pairingState?.sessionType) {
+            setState(prev => ({
+                ...prev,
+                sessionType: screenSession.pairingState.sessionType,
+            }))
+        }
+    }, [
+        editorSession.pairingState?.sessionType,
+        screenSession.pairingState?.sessionType,
+    ])
+
     // Handle pairing through the appropriate session type
     const handlePairDevice = useCallback(
         async (code: string) => {
@@ -67,8 +85,8 @@ export function useSession() {
 
     // Update parent state based on active session
     useEffect(() => {
+        // If either session is connected, use its state
         if (editorSession.state.isConnected) {
-            console.log('📝 Activating code editor session')
             setState(prev => ({
                 ...prev,
                 isConnected: true,
@@ -77,7 +95,6 @@ export function useSession() {
                 error: editorSession.state.error,
             }))
         } else if (screenSession.state.isConnected) {
-            console.log('🎥 Activating screen recording session')
             setState(prev => ({
                 ...prev,
                 isConnected: true,
@@ -87,17 +104,21 @@ export function useSession() {
                 isSharing: screenSession.state.isSharing,
                 isRecording: screenSession.state.isRecording,
             }))
+        } else if (
+            editorSession.state.pairingCode ||
+            screenSession.state.pairingCode
+        ) {
+            // If we have a pairing code but no connection yet, preserve the current session type
+            setState(prev => ({
+                ...prev,
+                pairingCode:
+                    editorSession.state.pairingCode ||
+                    screenSession.state.pairingCode,
+                // Crucial: preserve the session type instead of clearing it
+                sessionType: prev.sessionType,
+            }))
         }
-    }, [
-        editorSession.state.isConnected,
-        editorSession.state.pairingCode,
-        editorSession.state.error,
-        screenSession.state.isConnected,
-        screenSession.state.pairingCode,
-        screenSession.state.error,
-        screenSession.state.isSharing,
-        screenSession.state.isRecording,
-    ])
+    }, [editorSession.state, screenSession.state])
 
     const cleanup = useCallback(() => {
         editorSession.cleanup()

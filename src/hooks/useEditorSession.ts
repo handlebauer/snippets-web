@@ -2,7 +2,26 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { useEventManager } from './editor/useEventManager'
 import { usePairing } from './usePairing'
+
+type SessionMode = 'REALTIME' | 'PLAYBACK' | 'ARCHIVE'
+
+type ChangeType = 'insert' | 'delete' | 'replace'
+
+interface EditorEvent {
+    type: ChangeType
+    timestamp: number
+    from: number
+    to: number
+    text: string
+    removed?: string
+    metadata?: {
+        isSignificant?: boolean
+        changeSize?: number
+        description?: string
+    }
+}
 
 interface EditorState {
     isConnected: boolean
@@ -11,6 +30,7 @@ interface EditorState {
     pairingCode: string
     content: string
     isInitialContentSet: boolean
+    mode: SessionMode
 }
 
 export function useEditorSession() {
@@ -27,11 +47,28 @@ export function useEditorSession() {
         pairingCode: '',
         content: '',
         isInitialContentSet: false,
+        mode: 'REALTIME',
+    })
+
+    // Use our event manager hook
+    const { queueEvent } = useEventManager({
+        channel,
+        isConnected: state.isConnected,
+        pairingCode: state.pairingCode,
+        content: state.content,
+        mode: state.mode,
     })
 
     // Listen for session type and handle editor-specific setup
     useEffect(() => {
+        console.log('🔄 [useEditorSession] Effect running:', {
+            sessionType: pairingState.sessionType,
+            hasChannel: !!channel,
+            isInitialContentSet: state.isInitialContentSet,
+        })
+
         if (pairingState.sessionType === 'code_editor' && channel) {
+            console.log('📝 [useEditorSession] Setting up editor session')
             setState(prev => ({
                 ...prev,
                 isConnected: true,
@@ -39,19 +76,31 @@ export function useEditorSession() {
             }))
 
             // Set up editor-specific channel listeners
-            channel.on(
-                'broadcast',
-                { event: 'editor_content' },
-                ({ payload }) => {
-                    if (!state.isInitialContentSet) {
-                        setState(prev => ({
-                            ...prev,
-                            content: payload.content,
-                            isInitialContentSet: true,
-                        }))
-                    }
-                },
-            )
+            const handleEditorContent = ({
+                payload,
+            }: {
+                payload: { content: string }
+            }) => {
+                setState(prev => ({
+                    ...prev,
+                    content: payload.content,
+                    isInitialContentSet: true,
+                }))
+            }
+
+            // Only subscribe if we haven't received initial content
+            if (!state.isInitialContentSet) {
+                channel.on(
+                    'broadcast',
+                    { event: 'editor_content' },
+                    handleEditorContent,
+                )
+            }
+
+            // Cleanup function to remove the listener
+            return () => {
+                channel.unsubscribe()
+            }
         }
     }, [
         pairingState.sessionType,
@@ -62,17 +111,11 @@ export function useEditorSession() {
 
     // Handle content updates and broadcast to channel
     const updateContent = useCallback(
-        (newContent: string) => {
-            if (channel && state.isConnected) {
-                channel.send({
-                    type: 'broadcast',
-                    event: 'editor_content_update',
-                    payload: { content: newContent },
-                })
-            }
+        (newContent: string, event: EditorEvent) => {
             setState(prev => ({ ...prev, content: newContent }))
+            queueEvent(event)
         },
-        [channel, state.isConnected],
+        [queueEvent],
     )
 
     // Clean up both editor state and pairing
@@ -85,6 +128,7 @@ export function useEditorSession() {
             pairingCode: '',
             content: '',
             isInitialContentSet: false,
+            mode: 'REALTIME',
         })
     }, [cleanup])
 
@@ -93,5 +137,6 @@ export function useEditorSession() {
         handlePairDevice,
         updateContent,
         cleanup: handleCleanup,
+        pairingState,
     }
 }
