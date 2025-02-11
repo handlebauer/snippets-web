@@ -9,7 +9,7 @@ import { useEventManager } from './editor/useEventManager'
 type SessionMode = 'REALTIME' | 'PLAYBACK' | 'ARCHIVE'
 type ChangeType = 'insert' | 'delete' | 'replace'
 
-interface EditorEvent {
+export interface EditorEvent {
     type: ChangeType
     timestamp: number
     from: number

@@ -6,7 +6,11 @@ import { useChannel } from '../contexts/channel-context'
 import { useEditorSession } from './useEditorSession'
 import { useScreenSession } from './useScreenSession'
 
-// Match the shape of the original ScreenShareState for compatibility
+import type { EditorEvent } from './useEditorSession'
+
+// Types
+type SessionType = 'screen_recording' | 'code_editor' | null
+
 interface SessionState {
     isSharing: boolean
     isRecording: boolean
@@ -17,20 +21,40 @@ interface ExtendedSessionState extends SessionState {
     isPairing: boolean
     error: string | null
     pairingCode: string
-    sessionType: 'screen_recording' | 'code_editor' | null
+    sessionType: SessionType
+}
+
+interface EditorSessionAPI {
+    content: string
+    isRecording: boolean
+    updateContent: (content: string, event: EditorEvent) => void
+    initialize: () => void
+    finishRecording: () => void
+    startRecording: () => void
+}
+
+interface ScreenSessionAPI {
+    isSharing: boolean
+    isRecording: boolean
+    startSharing: () => Promise<void>
+    stopSharing: () => void
+}
+
+// Constants
+const INITIAL_SESSION_STATE: SessionState = {
+    isSharing: false,
+    isRecording: false,
 }
 
 export function useSession() {
-    const [localState, setLocalState] = useState<SessionState>({
-        isSharing: false,
-        isRecording: false,
-    })
-
+    const [localState, setLocalState] = useState<SessionState>(
+        INITIAL_SESSION_STATE,
+    )
     const editorSession = useEditorSession()
     const screenSession = useScreenSession()
     const { state: channelState } = useChannel()
 
-    // Memoize the combined state to prevent unnecessary re-renders
+    // Combined state management
     const combinedState = useMemo(
         () => ({
             ...localState,
@@ -53,7 +77,7 @@ export function useSession() {
         ],
     )
 
-    // Handle pairing through the appropriate session type
+    // Device pairing handler
     const handlePairDevice = useCallback(
         async (code: string) => {
             try {
@@ -63,21 +87,20 @@ export function useSession() {
                     screenSession.handlePairDevice(code),
                 ])
             } catch (error) {
-                console.error('Pairing error:', error)
+                console.error('❌ Pairing error:', error)
                 throw error
             }
         },
         [editorSession, screenSession],
     )
 
-    // Update parent state based on active session
+    // Session state synchronization
     useEffect(() => {
         const editorType = editorSession.state.sessionType
         const screenType = screenSession.state.sessionType
         const editorRecording = editorSession.state.isRecording
         const screenRecording = screenSession.state.isRecording
         const screenSharing = screenSession.state.isSharing
-
         // Only update if we have a definitive session type
         if (editorType === 'code_editor') {
             setLocalState(prev => {
@@ -88,17 +111,16 @@ export function useSession() {
             })
         } else if (screenType === 'screen_recording') {
             setLocalState(prev => {
-                if (
+                const shouldUpdate =
                     prev.isRecording !== screenRecording ||
                     prev.isSharing !== screenSharing
-                ) {
-                    return {
-                        ...prev,
-                        isSharing: screenSharing,
-                        isRecording: screenRecording,
-                    }
-                }
-                return prev
+                return shouldUpdate
+                    ? {
+                          ...prev,
+                          isSharing: screenSharing,
+                          isRecording: screenRecording,
+                      }
+                    : prev
             })
         }
     }, [
@@ -109,31 +131,31 @@ export function useSession() {
         screenSession.state.isSharing,
     ])
 
+    // Cleanup handler
     const cleanup = useCallback(() => {
         editorSession.cleanup()
         screenSession.cleanup()
-        setLocalState({
-            isSharing: false,
-            isRecording: false,
-        })
+        setLocalState(INITIAL_SESSION_STATE)
     }, [editorSession, screenSession])
 
-    // For backward compatibility with useWebRTC usage
+    // Screen sharing handlers
     const startScreenSharing = useCallback(async () => {
         console.log('🎬 Starting screen sharing...', {
             currentSessionType: screenSession.state.sessionType,
         })
+
         if (screenSession.state.sessionType === 'screen_recording') {
             return screenSession.startSharing()
-        } else if (!screenSession.state.sessionType) {
-            // If no session type is set yet, we're likely in screen recording mode
-            // This happens when the user clicks "Start Recording" before the mobile app
-            // has sent the session type
+        }
+
+        // Handle case where session type isn't set yet
+        if (!screenSession.state.sessionType) {
             console.log(
                 '📱 No session type set, defaulting to screen recording',
             )
             return screenSession.startSharing()
         }
+
         console.warn(
             '⚠️ Attempted to start screen sharing in non-screen session',
         )
@@ -147,7 +169,7 @@ export function useSession() {
         console.warn('⚠️ Attempted to stop sharing in non-screen session')
     }, [screenSession])
 
-    // Allow external state updates for specific fields
+    // External state update handler
     const setState = useCallback(
         (
             updater: (
@@ -184,20 +206,27 @@ export function useSession() {
                 })
             }
 
-            // Handle error updates by propagating to the active session
+            // Handle error propagation
             if ('error' in updates && updates.error !== combinedState.error) {
+                let activeSession: 'editor' | 'screen' | null = null
+
                 if (editorSession.state.sessionType === 'code_editor') {
-                    // Handle error in editor session
-                    console.log('Updating editor session error:', updates.error)
+                    activeSession = 'editor'
                 } else if (
                     screenSession.state.sessionType === 'screen_recording'
                 ) {
-                    // Handle error in screen session
-                    console.log('Updating screen session error:', updates.error)
+                    activeSession = 'screen'
+                }
+
+                if (activeSession) {
+                    console.log(
+                        `Updating ${activeSession} session error:`,
+                        updates.error,
+                    )
                 }
             }
 
-            // Handle pairing code updates - only if it's actually changed
+            // Log pairing code update attempts
             if (
                 'pairingCode' in updates &&
                 updates.pairingCode !== undefined &&
@@ -208,8 +237,35 @@ export function useSession() {
                 )
             }
         },
-        [combinedState],
+        [
+            combinedState,
+            editorSession.state.sessionType,
+            screenSession.state.sessionType,
+        ],
     )
+
+    // Session-specific API exposure
+    let editorAPI: EditorSessionAPI | null = null
+    if (editorSession.state.sessionType === 'code_editor') {
+        editorAPI = {
+            content: editorSession.state.content,
+            isRecording: editorSession.state.isRecording,
+            updateContent: editorSession.updateContent,
+            initialize: editorSession.initialize,
+            finishRecording: editorSession.finishRecording,
+            startRecording: editorSession.startRecording,
+        }
+    }
+
+    let screenAPI: ScreenSessionAPI | null = null
+    if (screenSession.state.sessionType === 'screen_recording') {
+        screenAPI = {
+            isSharing: screenSession.state.isSharing,
+            isRecording: screenSession.state.isRecording,
+            startSharing: screenSession.startSharing,
+            stopSharing: screenSession.stopSharing,
+        }
+    }
 
     return {
         state: combinedState,
@@ -218,26 +274,7 @@ export function useSession() {
         startScreenSharing,
         stopSharing,
         cleanup,
-        // Expose session-specific functionality
-        editor:
-            editorSession.state.sessionType === 'code_editor'
-                ? {
-                      content: editorSession.state.content,
-                      isRecording: editorSession.state.isRecording,
-                      updateContent: editorSession.updateContent,
-                      initialize: editorSession.initialize,
-                      finishRecording: editorSession.finishRecording,
-                      startRecording: editorSession.startRecording,
-                  }
-                : null,
-        screen:
-            screenSession.state.sessionType === 'screen_recording'
-                ? {
-                      isSharing: screenSession.state.isSharing,
-                      isRecording: screenSession.state.isRecording,
-                      startSharing: screenSession.startSharing,
-                      stopSharing: screenSession.stopSharing,
-                  }
-                : null,
+        editor: editorAPI,
+        screen: screenAPI,
     }
 }
