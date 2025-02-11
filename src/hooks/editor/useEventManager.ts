@@ -192,10 +192,32 @@ export function useEventManager({
                 return
             }
 
+            // Try to get pairing code from props or localStorage
+            let effectivePairingCode = pairingCode
+            if (!effectivePairingCode) {
+                const sessionData = localStorage.getItem('editorSession')
+                if (sessionData) {
+                    const { pairingCode: storedCode } = JSON.parse(sessionData)
+                    effectivePairingCode = storedCode
+                    console.log(
+                        '📝 [useEventManager] Using stored pairing code:',
+                        storedCode,
+                    )
+                }
+            }
+
+            // Verify we have a pairing code
+            if (!effectivePairingCode) {
+                console.error(
+                    '❌ [useEventManager] Missing pairing code (not found in props or localStorage)',
+                )
+                return
+            }
+
             console.log('📤 [useEventManager] Sending batch:', {
                 eventCount: batch.events.length,
                 timeSpanMs: batch.timestamp_end - batch.timestamp_start,
-                pairingCode,
+                pairingCode: effectivePairingCode,
                 isRecording,
             })
 
@@ -204,14 +226,17 @@ export function useEventManager({
                 channel.send({
                     type: 'broadcast',
                     event: 'editor_batch',
-                    payload: batch,
+                    payload: {
+                        ...batch,
+                        pairing_code: effectivePairingCode, // Include pairing code in the batch
+                    },
                 })
 
                 console.log('📱 [useEventManager] Batch sent to mobile client')
 
                 // Store batch in database (we know we're recording at this point)
                 console.log('💾 [useEventManager] Storing batch in database:', {
-                    pairing_code: pairingCode,
+                    pairing_code: effectivePairingCode,
                     event_count: batch.events.length,
                     first_event_type: batch.events[0].type,
                 })
@@ -219,7 +244,7 @@ export function useEventManager({
                 const { data, error } = await createClient().rpc(
                     'store_editor_event_batch',
                     {
-                        pairing_code: pairingCode,
+                        pairing_code: effectivePairingCode,
                         timestamp_start: batch.timestamp_start,
                         timestamp_end: batch.timestamp_end,
                         events: batch.events as unknown as Json,
