@@ -160,7 +160,9 @@ export type Database = {
                     id: string
                     initial_content: string | null
                     linked_repo: string | null
-                    status: string | null
+                    status:
+                        | Database['public']['Enums']['recording_session_status']
+                        | null
                     type:
                         | Database['public']['Enums']['recording_session_type']
                         | null
@@ -173,7 +175,9 @@ export type Database = {
                     id?: string
                     initial_content?: string | null
                     linked_repo?: string | null
-                    status?: string | null
+                    status?:
+                        | Database['public']['Enums']['recording_session_status']
+                        | null
                     type?:
                         | Database['public']['Enums']['recording_session_type']
                         | null
@@ -186,7 +190,9 @@ export type Database = {
                     id?: string
                     initial_content?: string | null
                     linked_repo?: string | null
-                    status?: string | null
+                    status?:
+                        | Database['public']['Enums']['recording_session_status']
+                        | null
                     type?:
                         | Database['public']['Enums']['recording_session_type']
                         | null
@@ -300,9 +306,21 @@ export type Database = {
                 }
                 Returns: Json
             }
+            update_session_status: {
+                Args: {
+                    new_status: Database['public']['Enums']['recording_session_status']
+                    pairing_code: string
+                }
+                Returns: Json
+            }
         }
         Enums: {
             editor_event_type: 'insert' | 'delete' | 'replace'
+            recording_session_status:
+                | 'draft'
+                | 'recording'
+                | 'saved'
+                | 'deleted'
             recording_session_type: 'screen_recording' | 'code_editor'
         }
         CompositeTypes: {
