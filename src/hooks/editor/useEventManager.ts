@@ -29,9 +29,9 @@ type SessionMode = keyof typeof BATCH_THRESHOLDS
 
 // Constants for snapshot creation
 const SNAPSHOT_THRESHOLDS = {
-    TIME_MS: 30000, // Every 30 seconds
-    EVENTS: 100, // Every 100 events
-    MIN_CHANGES: 50, // Minimum character changes before considering time/event thresholds
+    TIME_MS: 20 * 1000, // Every 15 seconds (down from 30)
+    EVENTS: 50, // Every 50 events (down from 100)
+    MIN_CHANGES: 30, // Minimum 20 character changes (down from 50)
 } as const
 
 // Types for our event logging system
@@ -289,62 +289,108 @@ export function useEventManager({
     )
 
     const shouldCreateSnapshot = useCallback((event: EditorEvent): boolean => {
-        const timeSinceLastSnapshot = Date.now() - lastSnapshotTimeRef.current
-        const eventsSinceLastSnapshot =
+        // Time-based tracking
+        const millisecondsSinceLastSnapshot =
+            Date.now() - lastSnapshotTimeRef.current
+        const hasReachedTimeThreshold =
+            millisecondsSinceLastSnapshot >= SNAPSHOT_THRESHOLDS.TIME_MS
+
+        // Event-based tracking (creates snapshot every N events)
+        const eventsUntilNextSnapshot =
             totalEventsRef.current % SNAPSHOT_THRESHOLDS.EVENTS
-        const changes = changesSinceSnapshotRef.current
+        const hasReachedEventThreshold = eventsUntilNextSnapshot === 0
 
-        console.log('📸 [useEventManager] Evaluating snapshot creation:', {
-            timeSinceLastSnapshot,
-            eventsSinceLastSnapshot,
-            changesSinceSnapshot: changes,
-            minChangesRequired: SNAPSHOT_THRESHOLDS.MIN_CHANGES,
-            isSignificantEvent: event.metadata?.isSignificant,
-        })
+        // Change-based tracking
+        const totalCharacterChanges = changesSinceSnapshotRef.current
+        const hasMinimumChanges =
+            totalCharacterChanges >= SNAPSHOT_THRESHOLDS.MIN_CHANGES
 
-        // Always create snapshot for significant events if we have minimum changes
-        if (
-            event.metadata?.isSignificant &&
-            changes >= SNAPSHOT_THRESHOLDS.MIN_CHANGES
-        ) {
-            console.log(
-                '🎯 [useEventManager] Creating snapshot for significant event',
-            )
-            return true
-        }
+        // Event significance
+        const isSignificantEvent = event.metadata?.isSignificant ?? false
 
-        // Only consider time/event thresholds if we have minimum changes
-        if (changes >= SNAPSHOT_THRESHOLDS.MIN_CHANGES) {
+        // Only proceed if we have enough character changes
+        if (hasMinimumChanges) {
+            // Create snapshot if any threshold is met
             const shouldCreate =
-                timeSinceLastSnapshot >= SNAPSHOT_THRESHOLDS.TIME_MS ||
-                eventsSinceLastSnapshot === 0
+                hasReachedTimeThreshold || // Time threshold (e.g., 15 seconds passed)
+                hasReachedEventThreshold || // Event threshold (e.g., every 50 events)
+                isSignificantEvent // Significant events (e.g., file saved)
 
+            // Log snapshot evaluation details
+            console.log('📸 [useEventManager] Evaluating snapshot creation:', {
+                millisecondsSinceLastSnapshot,
+                timeThreshold: SNAPSHOT_THRESHOLDS.TIME_MS,
+                eventsUntilNextSnapshot,
+                totalCharacterChanges,
+                minChangesRequired: SNAPSHOT_THRESHOLDS.MIN_CHANGES,
+                isSignificantEvent,
+                thresholds: {
+                    changes: hasMinimumChanges,
+                    time: hasReachedTimeThreshold,
+                    events: hasReachedEventThreshold,
+                },
+                shouldCreate,
+            })
+
+            // Log if we're creating a snapshot and why
             if (shouldCreate) {
-                console.log(
-                    '⏱️ [useEventManager] Snapshot threshold reached:',
-                    {
-                        reason:
-                            timeSinceLastSnapshot >= SNAPSHOT_THRESHOLDS.TIME_MS
-                                ? 'time elapsed'
-                                : 'event count',
-                    },
-                )
+                const reason = isSignificantEvent
+                    ? 'significant event'
+                    : hasReachedTimeThreshold
+                      ? 'time threshold reached'
+                      : 'event threshold reached'
+
+                console.log('⏱️ [useEventManager] Creating snapshot:', {
+                    reason,
+                    millisecondsSinceLastSnapshot,
+                    timeThreshold: SNAPSHOT_THRESHOLDS.TIME_MS,
+                    eventsUntilNextSnapshot,
+                    totalEvents: totalEventsRef.current,
+                })
             }
 
             return shouldCreate
         }
+
+        // Log if we don't have enough changes yet
+        console.log('❌ [useEventManager] Not enough changes for snapshot:', {
+            currentChanges: totalCharacterChanges,
+            requiredChanges: SNAPSHOT_THRESHOLDS.MIN_CHANGES,
+        })
 
         return false
     }, [])
 
     const createSnapshot = useCallback(
         async (eventIndex: number): Promise<void> => {
-            if (!pairingCode || !isConnected) {
+            console.log('🔎 [useEventManager] Entering createSnapshot:', {
+                hasPairingCode: !!pairingCode,
+                isConnected,
+                isRecording,
+                eventIndex,
+            })
+
+            // Try to get pairing code from props or localStorage
+            let effectivePairingCode = pairingCode
+            if (!effectivePairingCode) {
+                const sessionData = localStorage.getItem('editorSession')
+                if (sessionData) {
+                    const { pairingCode: storedCode } = JSON.parse(sessionData)
+                    effectivePairingCode = storedCode
+                    console.log(
+                        '📝 [useEventManager] Using stored pairing code for snapshot:',
+                        storedCode,
+                    )
+                }
+            }
+
+            if (!effectivePairingCode || !isConnected) {
                 console.warn(
                     '🔌 [useEventManager] Cannot create snapshot: not connected',
                     {
-                        hasPairingCode: !!pairingCode,
+                        hasPairingCode: !!effectivePairingCode,
                         isConnected,
+                        pairingCode: effectivePairingCode,
                     },
                 )
                 return
@@ -354,14 +400,30 @@ export function useEventManager({
             if (!isRecording) {
                 console.log(
                     '⏸️ [useEventManager] Skipping snapshot: not recording',
+                    {
+                        isRecording,
+                        pairingCode: effectivePairingCode,
+                        isConnected,
+                    },
                 )
                 return
             }
 
+            // Store current counter values in case we need to restore them
+            const prevChangeCount = changesSinceSnapshotRef.current
+            const prevSnapshotTime = lastSnapshotTimeRef.current
+
+            // Reset counters before attempting storage
+            lastSnapshotTimeRef.current = Date.now()
+            changesSinceSnapshotRef.current = 0
+
             console.log('📸 [useEventManager] Creating snapshot:', {
                 eventIndex,
                 contentLength: content.length,
-                changesSinceLastSnapshot: changesSinceSnapshotRef.current,
+                previousChanges: prevChangeCount,
+                pairingCode: effectivePairingCode,
+                isRecording,
+                isConnected,
             })
 
             try {
@@ -371,9 +433,9 @@ export function useEventManager({
                     event_index: eventIndex,
                     metadata: {
                         isKeyFrame:
-                            changesSinceSnapshotRef.current >=
+                            prevChangeCount >=
                             SNAPSHOT_THRESHOLDS.MIN_CHANGES * 2,
-                        description: `Snapshot after ${changesSinceSnapshotRef.current} characters changed`,
+                        description: `Snapshot after ${prevChangeCount} characters changed`,
                     },
                 }
 
@@ -381,7 +443,7 @@ export function useEventManager({
                 const { error } = await createClient().rpc(
                     'store_editor_snapshot',
                     {
-                        pairing_code: pairingCode,
+                        pairing_code: effectivePairingCode,
                         event_index: snapshot.event_index,
                         timestamp: snapshot.timestamp,
                         content: snapshot.content,
@@ -390,11 +452,24 @@ export function useEventManager({
                 )
 
                 if (error) {
+                    // Restore previous counter values on error
+                    lastSnapshotTimeRef.current = prevSnapshotTime
+                    changesSinceSnapshotRef.current = prevChangeCount
+
                     console.error(
                         '❌ [useEventManager] Failed to store snapshot:',
                         {
                             error,
                             eventIndex,
+                            errorCode: error.code,
+                            errorMessage: error.message,
+                            errorDetails: error.details,
+                            restoredCounters: {
+                                changes: prevChangeCount,
+                                lastSnapshot: new Date(
+                                    prevSnapshotTime,
+                                ).toISOString(),
+                            },
                         },
                     )
                 } else {
@@ -403,16 +478,32 @@ export function useEventManager({
                         {
                             eventIndex,
                             isKeyFrame: snapshot.metadata?.isKeyFrame,
+                            contentLength: content.length,
+                            pairingCode: effectivePairingCode,
+                            countersReset: {
+                                changes: changesSinceSnapshotRef.current,
+                                lastSnapshot: new Date(
+                                    lastSnapshotTimeRef.current,
+                                ).toISOString(),
+                            },
                         },
                     )
-                    // Reset tracking counters
-                    lastSnapshotTimeRef.current = Date.now()
-                    changesSinceSnapshotRef.current = 0
                 }
             } catch (err) {
+                // Restore previous counter values on error
+                lastSnapshotTimeRef.current = prevSnapshotTime
+                changesSinceSnapshotRef.current = prevChangeCount
+
                 console.error('💥 [useEventManager] Error creating snapshot:', {
                     error: err,
                     eventIndex,
+                    pairingCode: effectivePairingCode,
+                    isRecording,
+                    isConnected,
+                    restoredCounters: {
+                        changes: prevChangeCount,
+                        lastSnapshot: new Date(prevSnapshotTime).toISOString(),
+                    },
                 })
             }
         },
@@ -495,8 +586,25 @@ export function useEventManager({
             }
 
             // Check if we should create a snapshot
-            if (shouldCreateSnapshot(event)) {
-                createSnapshot(totalEventsRef.current)
+            const shouldCreate = shouldCreateSnapshot(event)
+            console.log('🔍 [useEventManager] Snapshot decision:', {
+                shouldCreate,
+                isRecording,
+                isConnected,
+                hasPairingCode: !!pairingCode,
+                totalEvents: totalEventsRef.current,
+            })
+
+            if (shouldCreate) {
+                console.log(
+                    '🎯 [useEventManager] Attempting to create snapshot...',
+                )
+                createSnapshot(totalEventsRef.current).catch(err => {
+                    console.error(
+                        '💥 [useEventManager] Snapshot creation promise rejected:',
+                        err,
+                    )
+                })
             }
 
             if (shouldCreateBatch(event)) {
@@ -522,6 +630,7 @@ export function useEventManager({
             mode,
             shouldCreateSnapshot,
             createSnapshot,
+            pairingCode,
         ],
     )
 

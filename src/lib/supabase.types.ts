@@ -297,6 +297,13 @@ export type Database = {
                     thumbnail_code: string
                 }[]
             }
+            finalize_recording_session: {
+                Args: {
+                    pairing_code: string
+                    duration_ms: number
+                }
+                Returns: Json
+            }
             get_github_repos_for_session: {
                 Args: {
                     pairing_code: string
