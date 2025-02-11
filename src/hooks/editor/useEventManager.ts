@@ -192,32 +192,16 @@ export function useEventManager({
                 return
             }
 
-            // Try to get pairing code from props or localStorage
-            let effectivePairingCode = pairingCode
-            if (!effectivePairingCode) {
-                const sessionData = localStorage.getItem('editorSession')
-                if (sessionData) {
-                    const { pairingCode: storedCode } = JSON.parse(sessionData)
-                    effectivePairingCode = storedCode
-                    console.log(
-                        '📝 [useEventManager] Using stored pairing code:',
-                        storedCode,
-                    )
-                }
-            }
-
             // Verify we have a pairing code
-            if (!effectivePairingCode) {
-                console.error(
-                    '❌ [useEventManager] Missing pairing code (not found in props or localStorage)',
-                )
+            if (!pairingCode) {
+                console.error('❌ [useEventManager] Missing pairing code')
                 return
             }
 
             console.log('📤 [useEventManager] Sending batch:', {
                 eventCount: batch.events.length,
                 timeSpanMs: batch.timestamp_end - batch.timestamp_start,
-                pairingCode: effectivePairingCode,
+                pairingCode,
                 isRecording,
             })
 
@@ -228,7 +212,7 @@ export function useEventManager({
                     event: 'editor_batch',
                     payload: {
                         ...batch,
-                        pairing_code: effectivePairingCode, // Include pairing code in the batch
+                        pairing_code: pairingCode, // Include pairing code in the batch
                     },
                 })
 
@@ -236,7 +220,7 @@ export function useEventManager({
 
                 // Store batch in database (we know we're recording at this point)
                 console.log('💾 [useEventManager] Storing batch in database:', {
-                    pairing_code: effectivePairingCode,
+                    pairing_code: pairingCode,
                     event_count: batch.events.length,
                     first_event_type: batch.events[0].type,
                 })
@@ -244,7 +228,7 @@ export function useEventManager({
                 const { data, error } = await createClient().rpc(
                     'store_editor_event_batch',
                     {
-                        pairing_code: effectivePairingCode,
+                        pairing_code: pairingCode,
                         timestamp_start: batch.timestamp_start,
                         timestamp_end: batch.timestamp_end,
                         events: batch.events as unknown as Json,
@@ -370,27 +354,13 @@ export function useEventManager({
                 eventIndex,
             })
 
-            // Try to get pairing code from props or localStorage
-            let effectivePairingCode = pairingCode
-            if (!effectivePairingCode) {
-                const sessionData = localStorage.getItem('editorSession')
-                if (sessionData) {
-                    const { pairingCode: storedCode } = JSON.parse(sessionData)
-                    effectivePairingCode = storedCode
-                    console.log(
-                        '📝 [useEventManager] Using stored pairing code for snapshot:',
-                        storedCode,
-                    )
-                }
-            }
-
-            if (!effectivePairingCode || !isConnected) {
+            if (!pairingCode || !isConnected) {
                 console.warn(
                     '🔌 [useEventManager] Cannot create snapshot: not connected',
                     {
-                        hasPairingCode: !!effectivePairingCode,
+                        hasPairingCode: !!pairingCode,
                         isConnected,
-                        pairingCode: effectivePairingCode,
+                        pairingCode: pairingCode,
                     },
                 )
                 return
@@ -402,7 +372,7 @@ export function useEventManager({
                     '⏸️ [useEventManager] Skipping snapshot: not recording',
                     {
                         isRecording,
-                        pairingCode: effectivePairingCode,
+                        pairingCode: pairingCode,
                         isConnected,
                     },
                 )
@@ -421,7 +391,7 @@ export function useEventManager({
                 eventIndex,
                 contentLength: content.length,
                 previousChanges: prevChangeCount,
-                pairingCode: effectivePairingCode,
+                pairingCode: pairingCode,
                 isRecording,
                 isConnected,
             })
@@ -443,7 +413,7 @@ export function useEventManager({
                 const { error } = await createClient().rpc(
                     'store_editor_snapshot',
                     {
-                        pairing_code: effectivePairingCode,
+                        pairing_code: pairingCode,
                         event_index: snapshot.event_index,
                         timestamp: snapshot.timestamp,
                         content: snapshot.content,
@@ -479,7 +449,7 @@ export function useEventManager({
                             eventIndex,
                             isKeyFrame: snapshot.metadata?.isKeyFrame,
                             contentLength: content.length,
-                            pairingCode: effectivePairingCode,
+                            pairingCode: pairingCode,
                             countersReset: {
                                 changes: changesSinceSnapshotRef.current,
                                 lastSnapshot: new Date(
@@ -497,7 +467,7 @@ export function useEventManager({
                 console.error('💥 [useEventManager] Error creating snapshot:', {
                     error: err,
                     eventIndex,
-                    pairingCode: effectivePairingCode,
+                    pairingCode: pairingCode,
                     isRecording,
                     isConnected,
                     restoredCounters: {

@@ -2,16 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MEDIA_CONSTRAINTS } from '@/constants/webrtc'
+import { useChannel } from '@/contexts/channel-context'
 
-import { usePairing } from './usePairing'
 import { setupPeerConnection, stopMediaStream } from './webrtc/connection'
 import { handleVideoProcessing, setupRecorder } from './webrtc/recording'
 
+// Types
 interface ScreenState {
-    isConnected: boolean
-    isPairing: boolean
-    error: string | null
-    pairingCode: string
     isSharing: boolean
     isRecording: boolean
 }
@@ -24,31 +21,38 @@ interface WebRTCContext {
     isRecording: boolean
 }
 
+// Constants
+const INITIAL_SCREEN_STATE: ScreenState = {
+    isSharing: false,
+    isRecording: false,
+}
+
+const INITIAL_WEBRTC_CONTEXT: WebRTCContext = {
+    peerConnection: null,
+    stream: null,
+    mediaRecorder: null,
+    candidateQueue: [],
+    isRecording: false,
+}
+
+// Channel event types
+type RecordingSignal = {
+    action: 'start' | 'stop'
+}
+
 export function useScreenSession() {
     const {
-        state: pairingState,
-        channel,
+        state: channelState,
+        getChannel,
+        disconnect,
         handlePairDevice,
-        cleanup: cleanupPairing,
-    } = usePairing()
-    const [state, setState] = useState<ScreenState>({
-        isConnected: false,
-        isPairing: false,
-        error: null,
-        pairingCode: '',
-        isSharing: false,
-        isRecording: false,
-    })
+    } = useChannel()
+    const channel = getChannel()
 
-    // Context refs to hold WebRTC-related objects
-    const context = useRef<WebRTCContext>({
-        peerConnection: null,
-        stream: null,
-        mediaRecorder: null,
-        candidateQueue: [],
-        isRecording: false,
-    })
+    const [state, setState] = useState<ScreenState>(INITIAL_SCREEN_STATE)
+    const context = useRef<WebRTCContext>(INITIAL_WEBRTC_CONTEXT)
 
+    // Media cleanup handler
     const stopSharing = useCallback(() => {
         if (context.current.stream) {
             stopMediaStream(context.current.stream)
@@ -60,14 +64,7 @@ export function useScreenSession() {
             context.current.mediaRecorder.stop()
         }
 
-        context.current = {
-            peerConnection: null,
-            stream: null,
-            mediaRecorder: null,
-            candidateQueue: [],
-            isRecording: false,
-        }
-
+        context.current = INITIAL_WEBRTC_CONTEXT
         setState(prev => ({
             ...prev,
             isSharing: false,
@@ -75,103 +72,86 @@ export function useScreenSession() {
         }))
     }, [state.isRecording])
 
+    // Screen sharing handler
     const startSharing = useCallback(async () => {
-        if (!channel) {
-            setState(prev => ({
-                ...prev,
-                error: 'No channel available for screen sharing',
-            }))
-            return
-        }
-
         try {
-            // Get screen sharing stream
+            console.log('🎥 Starting screen share')
             const stream =
                 await navigator.mediaDevices.getDisplayMedia(MEDIA_CONSTRAINTS)
 
-            // Set up WebRTC connection
+            if (!channel) {
+                throw new Error('No channel available for screen sharing')
+            }
+
+            // Set up peer connection
             const { peerConnection } = await setupPeerConnection(
                 stream,
                 channel,
                 context.current.candidateQueue,
             )
 
-            // Update context
             context.current = {
                 ...context.current,
                 peerConnection,
                 stream,
             }
 
-            setState(prev => ({ ...prev, isSharing: true }))
-
-            // Handle user stopping screen share
+            // Handle stream stop
             stream.getVideoTracks()[0].onended = () => {
+                console.log('📺 Screen share stopped by user')
                 stopSharing()
             }
+
+            setState(prev => ({ ...prev, isSharing: true }))
         } catch (error) {
-            console.error('Screen sharing error:', error)
-            setState(prev => ({
-                ...prev,
-                error: 'Failed to start screen sharing. Please try again.',
-            }))
+            console.error('Failed to start screen share:', error)
             stopSharing()
         }
     }, [channel, stopSharing])
 
+    // Recording signal handler
     const handleRecordingSignal = useCallback(
-        async (signal: { action: 'start' | 'stop' }) => {
+        async (signal: RecordingSignal) => {
             console.log('🎥 Received recording signal:', {
                 action: signal.action,
-                hasStream: !!context.current.stream,
-                hasChannel: !!channel,
-                isRecording: context.current.isRecording,
+                isSharing: state.isSharing,
+                isRecording: state.isRecording,
             })
 
-            // For stop signals, we want to handle them regardless of stream state
             if (signal.action === 'stop') {
-                if (
-                    context.current.isRecording &&
-                    context.current.mediaRecorder
-                ) {
+                if (context.current.mediaRecorder) {
                     context.current.mediaRecorder.stop()
                 }
                 stopSharing()
                 return
             }
 
-            // For start signals, we need to ensure we have a stream
             if (signal.action === 'start') {
-                // If we don't have a stream yet, try to start sharing
+                // Start sharing if not already sharing
                 if (!context.current.stream) {
-                    console.log('🔄 No stream available, starting screen share')
                     try {
                         await startSharing()
-                        // Wait a bit for the stream to be ready
-                        await new Promise(resolve => setTimeout(resolve, 500))
                     } catch (error) {
-                        console.error('Failed to start screen share:', error)
+                        console.error('Failed to start sharing:', error)
                         return
                     }
                 }
 
-                const { stream } = context.current
-                if (!stream || !channel) {
-                    console.error(
-                        'Cannot record: No stream or channel available after setup',
-                    )
+                const stream = context.current.stream
+                if (!stream) {
+                    console.error('No stream available for recording')
                     return
                 }
 
                 if (!context.current.isRecording) {
                     try {
-                        console.log(
-                            '🎥 Setting up recorder with pairing code:',
-                            pairingState.pairingCode,
-                        )
+                        console.log('🎥 Setting up recorder:', {
+                            pairingCode: channelState.pairingCode,
+                        })
+
                         const recorder = setupRecorder(
                             stream,
-                            pairingState.pairingCode,
+                            channelState.pairingCode || '',
                             async (formData: FormData) => {
                                 if (channel) {
                                     await handleVideoProcessing(
@@ -190,8 +170,11 @@ export function useScreenSession() {
                             },
                         )
 
-                        context.current.isRecording = true
-                        context.current.mediaRecorder = recorder
+                        context.current = {
+                            ...context.current,
+                            isRecording: true,
+                            mediaRecorder: recorder,
+                        }
                         setState(prev => ({ ...prev, isRecording: true }))
                         recorder.start(1000)
                     } catch (error) {
@@ -202,49 +185,54 @@ export function useScreenSession() {
                 }
             }
         },
-        [channel, pairingState.pairingCode, stopSharing, startSharing],
+        [
+            channel,
+            channelState.pairingCode,
+            stopSharing,
+            startSharing,
+            state.isSharing,
+            state.isRecording,
+        ],
     )
 
-    // Listen for session type and handle screen-specific setup
+    // Channel event handlers setup
     useEffect(() => {
-        if (pairingState.sessionType === 'screen_recording' && channel) {
-            setState(prev => ({
-                ...prev,
-                isConnected: true,
-                pairingCode: pairingState.pairingCode,
-            }))
+        if (channel && channelState.sessionType === 'screen_recording') {
+            console.log('📺 Setting up screen recording session:', {
+                pairingCode: channelState.pairingCode,
+            })
 
-            // Set up recording signal handler
+            // Subscribe to recording signals
             channel.on('broadcast', { event: 'recording' }, ({ payload }) => {
-                handleRecordingSignal(payload)
+                handleRecordingSignal(payload as RecordingSignal)
             })
         }
     }, [
-        pairingState.sessionType,
-        pairingState.pairingCode,
+        channelState.sessionType,
+        channelState.pairingCode,
         channel,
         handleRecordingSignal,
     ])
 
+    // Cleanup handler
     const cleanup = useCallback(() => {
         stopSharing()
-        cleanupPairing()
-        setState({
-            isConnected: false,
-            isPairing: false,
-            error: null,
-            pairingCode: '',
-            isSharing: false,
-            isRecording: false,
-        })
-    }, [cleanupPairing, stopSharing])
+        disconnect()
+        setState(INITIAL_SCREEN_STATE)
+    }, [disconnect, stopSharing])
 
     return {
-        state,
+        state: {
+            ...state,
+            isConnected: channelState.isConnected,
+            isPairing: false,
+            error: channelState.error,
+            pairingCode: channelState.pairingCode || '',
+            sessionType: channelState.sessionType,
+        },
         handlePairDevice,
         startSharing,
         stopSharing,
         cleanup,
-        pairingState,
     }
 }

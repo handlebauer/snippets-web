@@ -1,13 +1,44 @@
+import type { Enums } from '@/lib/supabase.types'
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js'
 
 type ChannelStatus = 'SUBSCRIBED' | 'TIMED_OUT' | 'CLOSED' | 'CHANNEL_ERROR'
+type RecordingSessionType = Enums<'recording_session_type'>
+
+interface ChannelState {
+    isConnected: boolean
+    error: string | null
+    pairingCode: string | null
+    sessionType: RecordingSessionType | null
+}
+
+type StateUpdater = (updater: (prev: ChannelState) => ChannelState) => void
 
 // Track cleanup state for each channel
 const cleanupStates = new WeakMap<RealtimeChannel, boolean>()
 
+export const handleDisconnect = (setState: StateUpdater) => {
+    setState((prev: ChannelState) => ({
+        ...prev,
+        isConnected: false,
+        error: 'Channel disconnected',
+        sessionType: null,
+    }))
+}
+
+export const handleSessionType = (
+    setState: StateUpdater,
+    type: RecordingSessionType,
+) => {
+    setState((prev: ChannelState) => ({
+        ...prev,
+        sessionType: type,
+    }))
+}
+
 export const setupChannel = async (
     supabase: SupabaseClient,
     pairingCode: string,
+    setState: StateUpdater,
 ) => {
     console.log('🔄 Starting channel setup for code:', pairingCode)
     if (!pairingCode) {
@@ -25,6 +56,19 @@ export const setupChannel = async (
 
     // Initialize cleanup state
     cleanupStates.set(channel, false)
+
+    // Set up event handlers
+    channel.on('system', { event: '*' }, ({ eventType }) => {
+        if (eventType === 'disconnect') {
+            handleDisconnect(setState)
+        }
+    })
+
+    // Listen for session type signal
+    channel.on('broadcast', { event: 'session_type' }, ({ payload }) => {
+        console.log('📢 [Channel] Received session type signal:', payload)
+        handleSessionType(setState, payload.type as RecordingSessionType)
+    })
 
     // Wait for channel subscription and presence sync
     await new Promise<void>((resolve, reject) => {
