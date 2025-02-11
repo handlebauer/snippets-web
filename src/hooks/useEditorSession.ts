@@ -29,6 +29,7 @@ interface EditorState {
     error: string | null
     pairingCode: string
     content: string
+    initialContent: string | null
     isInitialContentSet: boolean
     mode: SessionMode
     isRecording: boolean
@@ -59,6 +60,7 @@ export function useEditorSession() {
                     error: null,
                     pairingCode,
                     content: '',
+                    initialContent: null,
                     isInitialContentSet: false,
                     mode: 'REALTIME',
                     isRecording: false,
@@ -72,6 +74,7 @@ export function useEditorSession() {
             error: null,
             pairingCode: '',
             content: '',
+            initialContent: null,
             isInitialContentSet: false,
             mode: 'REALTIME',
             isRecording: false,
@@ -99,6 +102,7 @@ export function useEditorSession() {
             error: null,
             pairingCode: '',
             content: '',
+            initialContent: null,
             isInitialContentSet: false,
             mode: 'REALTIME',
             isRecording: false,
@@ -161,6 +165,10 @@ export function useEditorSession() {
                 setState(prev => ({
                     ...prev,
                     content: payload.content,
+                    initialContent:
+                        prev.initialContent === null
+                            ? payload.content
+                            : prev.initialContent,
                     isInitialContentSet: true,
                 }))
             }
@@ -240,7 +248,14 @@ export function useEditorSession() {
                 changeSize: event.metadata?.changeSize,
                 isSignificant: event.metadata?.isSignificant,
             })
-            setState(prev => ({ ...prev, content: newContent }))
+            setState(prev => ({
+                ...prev,
+                content: newContent,
+                initialContent:
+                    prev.initialContent === null
+                        ? newContent
+                        : prev.initialContent,
+            }))
             queueEvent(event)
         },
         [queueEvent],
@@ -273,9 +288,10 @@ export function useEditorSession() {
             payload: {
                 timestamp: Date.now(),
                 content: state.content,
+                initialContent: state.initialContent || state.content,
             },
         })
-    }, [channel, state.isConnected, state.content])
+    }, [channel, state.isConnected, state.content, state.initialContent])
 
     // Signal that recording is finished
     const finishRecording = useCallback(() => {
