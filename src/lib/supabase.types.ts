@@ -273,6 +273,30 @@ export type Database = {
                 Args: Record<PropertyKey, never>
                 Returns: undefined
             }
+            fetch_user_recordings: {
+                Args: {
+                    profile_id_param: string
+                }
+                Returns: {
+                    id: string
+                    type: string
+                    created_at: string
+                    linked_repo: string
+                    name: string
+                    duration: number
+                    size: number
+                    storage_path: string
+                    mime_type: string
+                    thumbnail_url: string
+                    session_code: string
+                    initial_content: string
+                    duration_ms: number
+                    event_count: number
+                    status: string
+                    final_content: string
+                    thumbnail_code: string
+                }[]
+            }
             get_github_repos_for_session: {
                 Args: {
                     pairing_code: string
