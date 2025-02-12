@@ -5,7 +5,10 @@ import { join } from 'path'
 import { Readable } from 'stream'
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/utils/supabase.service'
+import installedFfmpeg from '@ffmpeg-installer/ffmpeg'
 import ffmpeg from 'fluent-ffmpeg'
+
+ffmpeg.setFfmpegPath(installedFfmpeg.path)
 
 export async function POST(request: Request) {
     console.log('📥 Received video upload request')

@@ -15,6 +15,7 @@
         "@ai-sdk/react": "^1.1.12",
         "@codemirror/lang-javascript": "^6.2.2",
         "@codemirror/theme-one-dark": "^6.1.2",
+        "@ffmpeg-installer/ffmpeg": "^1.1.0",
         "@radix-ui/react-slot": "^1.1.1",
         "@supabase/ssr": "^0.5.2",
         "@types/fluent-ffmpeg": "^2.1.27",
