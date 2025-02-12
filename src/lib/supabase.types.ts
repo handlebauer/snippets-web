@@ -159,6 +159,7 @@ export type Database = {
                     duration_ms: number | null
                     id: string
                     initial_content: string | null
+                    insights: Json | null
                     linked_repo: string | null
                     status:
                         | Database['public']['Enums']['recording_session_status']
@@ -166,6 +167,7 @@ export type Database = {
                     type:
                         | Database['public']['Enums']['recording_session_type']
                         | null
+                    updated_at: string | null
                     user_id: string
                 }
                 Insert: {
@@ -174,6 +176,7 @@ export type Database = {
                     duration_ms?: number | null
                     id?: string
                     initial_content?: string | null
+                    insights?: Json | null
                     linked_repo?: string | null
                     status?:
                         | Database['public']['Enums']['recording_session_status']
@@ -181,6 +184,7 @@ export type Database = {
                     type?:
                         | Database['public']['Enums']['recording_session_type']
                         | null
+                    updated_at?: string | null
                     user_id: string
                 }
                 Update: {
@@ -189,6 +193,7 @@ export type Database = {
                     duration_ms?: number | null
                     id?: string
                     initial_content?: string | null
+                    insights?: Json | null
                     linked_repo?: string | null
                     status?:
                         | Database['public']['Enums']['recording_session_status']
@@ -196,6 +201,7 @@ export type Database = {
                     type?:
                         | Database['public']['Enums']['recording_session_type']
                         | null
+                    updated_at?: string | null
                     user_id?: string
                 }
                 Relationships: [
@@ -295,6 +301,7 @@ export type Database = {
                     status: string
                     final_content: string
                     thumbnail_code: string
+                    insights: Json
                 }[]
             }
             finalize_recording_session: {
@@ -317,6 +324,13 @@ export type Database = {
                     timestamp_end: number
                     events: Json
                     event_count: number
+                }
+                Returns: Json
+            }
+            store_editor_insights: {
+                Args: {
+                    pairing_code: string
+                    insights_data: Json
                 }
                 Returns: Json
             }
@@ -355,7 +369,26 @@ export type Database = {
             recording_session_type: 'screen_recording' | 'code_editor'
         }
         CompositeTypes: {
-            [_ in never]: never
+            code_insights: {
+                summary: string | null
+                key_changes: string[] | null
+                complexity:
+                    | Database['public']['CompositeTypes']['insight_complexity']
+                    | null
+                suggestions:
+                    | Database['public']['CompositeTypes']['insight_suggestion'][]
+                    | null
+            }
+            insight_complexity: {
+                before: number | null
+                after: number | null
+                explanation: string | null
+            }
+            insight_suggestion: {
+                title: string | null
+                description: string | null
+                priority: string | null
+            }
         }
     }
 }
