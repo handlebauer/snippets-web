@@ -1,12 +1,12 @@
 'use client'
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { ViewUpdate } from '@codemirror/view'
 import CodeMirror from '@uiw/react-codemirror'
-import { Code, MonitorPlay, Settings } from 'lucide-react'
+import { Code, MonitorPlay, Settings, Smartphone } from 'lucide-react'
 
 import { useSession } from '@/hooks/useSession'
 
@@ -99,14 +99,58 @@ export default function EditorPage() {
         return () => window.removeEventListener('keydown', handleKeyDown)
     }, [router])
 
+    const [showPostRecording, setShowPostRecording] = useState(false)
+    const wasRecordingRef = useRef(false) // Track previous recording state
+
+    // Watch for recording state changes
+    useEffect(() => {
+        if (!editor) return
+
+        // Only show post recording when transitioning from recording to not recording
+        if (wasRecordingRef.current && !editor.isRecording) {
+            setShowPostRecording(true)
+        }
+
+        // Update previous state
+        wasRecordingRef.current = editor.isRecording
+    }, [editor?.isRecording, editor])
+
     const handleToggleRecording = useCallback(() => {
         if (!editor) return
         if (!editor.isRecording) {
             editor.startRecording()
         } else {
             editor.finishRecording()
+            // No need to set showPostRecording here anymore as the effect will handle it
         }
     }, [editor])
+
+    if (showPostRecording) {
+        return (
+            <div className="h-screen flex flex-col items-center justify-center bg-[#1A1A1A] text-white gap-6">
+                <div className="flex flex-col items-center gap-4 animate-fade-in">
+                    <div className="w-16 h-16 rounded-full bg-blue-500/10 flex items-center justify-center">
+                        <Smartphone className="w-8 h-8 text-blue-500" />
+                    </div>
+                    <div className="flex flex-col items-center gap-2">
+                        <h2 className="text-2xl font-semibold">
+                            Recording Complete!
+                        </h2>
+                        <p className="text-gray-400 text-center max-w-md">
+                            Check your mobile device to save or delete the
+                            recording.
+                        </p>
+                    </div>
+                </div>
+                <button
+                    onClick={() => router.push('/')}
+                    className="px-4 py-2 rounded-lg bg-[#2A2A2A] text-white hover:bg-[#333333] transition-colors"
+                >
+                    Return Home
+                </button>
+            </div>
+        )
+    }
 
     return (
         <div className="h-screen flex flex-col bg-[#1A1A1A]">

@@ -29,6 +29,7 @@ interface EditorState {
     isInitialContentSet: boolean
     mode: SessionMode
     isRecording: boolean
+    events: EditorEvent[]
 }
 
 // Constants
@@ -38,6 +39,7 @@ const INITIAL_EDITOR_STATE: EditorState = {
     isInitialContentSet: false,
     mode: 'REALTIME',
     isRecording: false,
+    events: [],
 }
 
 // Channel event types
@@ -98,6 +100,9 @@ export function useEditorSession() {
                     prev.initialContent === null
                         ? newContent
                         : prev.initialContent,
+                events: prev.isRecording
+                    ? [...prev.events, event]
+                    : prev.events,
             }))
             queueEvent(event)
         },
@@ -153,17 +158,35 @@ export function useEditorSession() {
         const message: BroadcastMessage<{
             timestamp: number
             content: string
+            initialContent: string
+            events: EditorEvent[]
         }> = {
             type: 'broadcast',
             event: 'editor_recording_finished',
             payload: {
                 timestamp: Date.now(),
                 content: state.content,
+                initialContent: state.initialContent || state.content,
+                events: state.events,
             },
         }
         channel.send(message)
-        handleCleanup()
-    }, [channel, channelState.isConnected, state.content, handleCleanup])
+
+        // Delay cleanup to ensure mobile app receives and processes the event
+        setTimeout(() => {
+            console.log(
+                '🧹 [useEditorSession] Delayed cleanup after recording finished',
+            )
+            handleCleanup()
+        }, 1000)
+    }, [
+        channel,
+        channelState.isConnected,
+        state.content,
+        state.initialContent,
+        state.events,
+        handleCleanup,
+    ])
 
     // Channel event handlers setup
     useEffect(() => {
@@ -217,7 +240,7 @@ export function useEditorSession() {
                     '📱 [useEditorSession] Recording finished from mobile',
                 )
                 setState(prev => ({ ...prev, isRecording: false }))
-                handleCleanup()
+                // Don't cleanup - let the web app show post recording view
             }
 
             // Subscribe to events
