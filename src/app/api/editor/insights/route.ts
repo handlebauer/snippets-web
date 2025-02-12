@@ -45,14 +45,41 @@ const InsightsResponseSchema = z.object({
             priority: z.enum(['low', 'medium', 'high']),
         }),
     ),
+    developerStyle: z.object({
+        timeDistribution: z.object({
+            thinkingTimePercent: z.number(),
+            activeEditingPercent: z.number(),
+            reviewingPercent: z.number(),
+        }),
+        editingPatterns: z.array(z.string()),
+        paceInsights: z.string(),
+    }),
 })
 
 const generatePrompt = (
     initialState: string,
     finalContent: string,
     events: EditorEvent[],
-) =>
-    dedent`
+) => {
+    // Calculate time gaps between consecutive events
+    const timeGaps = events.slice(1).map((event, i) => {
+        const prevEvent = events[i] // since we sliced, i is the index in the original array
+        return event.timestamp - prevEvent.timestamp
+    })
+
+    const averageGap =
+        timeGaps.length > 0
+            ? timeGaps.reduce((a, b) => a + b, 0) / timeGaps.length
+            : 0
+
+    // Log time gaps for debugging
+    console.log('[editor-insights] Time gaps:', {
+        gaps: timeGaps,
+        average: averageGap,
+        numEvents: events.length,
+    })
+
+    return dedent`
     Analyze this code change session and provide insights:
             
     Initial Code:
@@ -62,19 +89,32 @@ const generatePrompt = (
     ${finalContent}
 
     Number of events: ${events.length}
+    Average time between edits: ${averageGap}ms
 
     Please analyze the changes and provide:
     1. A concise summary of what changed
     2. Key changes made (as bullet points)
     3. Code complexity assessment (before and after)
     4. Specific suggestions for improvements
+    5. Developer style analysis including:
+       - Time distribution (thinking vs active editing vs reviewing)
+       - Identified editing patterns
+       - Insights about their coding pace and style
+
+    For the developer style analysis:
+    - Gaps > 2000ms suggest thinking/planning time
+    - Rapid sequential edits (gaps < 500ms) suggest active coding
+    - Small adjustments after pauses suggest reviewing/refining
+    - Look for patterns in edit sizes and types
 
     Focus on:
     - The main purpose of the changes
     - Any potential improvements in code quality
     - Performance implications
     - Best practices that could be applied
+    - The human aspects of how the code was written
 `
+}
 
 export async function POST(request: Request) {
     try {
@@ -90,7 +130,6 @@ export async function POST(request: Request) {
             pairingCode,
             initialState,
             finalContent,
-            events,
         })
 
         // Generate insights using AI
