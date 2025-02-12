@@ -286,6 +286,7 @@ export function useEditorSession() {
                 }
             }
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         channelState.sessionType,
         channelState.pairingCode,
