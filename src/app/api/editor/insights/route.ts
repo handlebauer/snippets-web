@@ -93,7 +93,7 @@ const generatePrompt = (
 
     Please analyze the changes and provide:
     1. A concise summary of what changed
-    2. Key changes made (as bullet points)
+    2. Key changes made (as bullet points, do not quote the code changes themselves)
     3. Code complexity assessment (before and after)
     4. Specific suggestions for improvements
     5. Developer style analysis including:
