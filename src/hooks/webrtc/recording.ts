@@ -31,7 +31,7 @@ export const handleVideoProcessing = async (
             sessionCode: formData.get('sessionCode'),
         })
 
-        const response = await fetch('/api/videos/upload', {
+        const response = await fetch('159.203.30.176:4321', {
             method: 'POST',
             body: formData,
         })
