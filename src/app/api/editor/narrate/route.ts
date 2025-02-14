@@ -1,11 +1,19 @@
-import { createGoogleGenerativeAI } from '@ai-sdk/google'
+// import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createOpenAI } from '@ai-sdk/openai'
 import { generateObject } from 'ai'
 import dedent from 'dedent'
 import { z } from 'zod'
 
-const google = createGoogleGenerativeAI({
-    apiKey: process.env.GEMINI_API_KEY,
+// const google = createGoogleGenerativeAI({
+//     apiKey: process.env.GEMINI_API_KEY,
+// })
+
+const openai = createOpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
 })
+
+// const model = google('gemini-2.0-flash-001')
+const model = openai('gpt-4o-mini')
 
 // Define the input schema for the narration request
 const NarrationRequestSchema = z.object({
@@ -96,7 +104,7 @@ const generatePrompt = ({
     })
 
     return dedent`
-    Narrate this code change session in a clear, conversational way:
+    Narrate this code change session in a clear, conversational way, as though you're the developer writing it:
 
     Context Before:
     ${context.before}
@@ -115,16 +123,22 @@ const generatePrompt = ({
 
     ${metadata?.description ? `Developer's Description: ${metadata.description}` : ''}
 
-    1. Provide a natural, conversational narration of what changed
-    2. Assume you are speaking to users who are watching the coding session
-    3. Focus on the intent and significance of the changes
-    4. Favor concise, informative narration (do not add unnecessary details)
+    1. Start by telling the viewer what you've added, removed, or modified
+    2. Do NOT begin your narration with "Okay" or "Alright" or any similar word
+    3. Be a confident programmer and provide natural, conversational narration
+    4. Assume you are speaking to users who are watching your coding session
+    5. Focus on the intent and significance of the changes
+    6. Favor concise, interesting narration (do not add unnecessary details)
 
     Consider:
     - The type and scope of changes
     - The pace of editing (gaps between events)
     - Any patterns in the changes
-    - The overall impact on code readability and functionality
+
+    - Parse for variable names and pronounce them as such, e.g.
+        - \`numB = 3\` -> ✅ "num bee" (❌ numb)
+        - \`hasID = false\` -> ✅ "has eye dee" (❌ "has id" like "kid")
+        - \`newStr = ""\` -> ✅ "new string" (❌ "new stir/star")
     `
 }
 
@@ -151,7 +165,8 @@ export async function POST(request: Request) {
 
         // Generate narration using AI
         const { object: narration } = await generateObject({
-            model: google('gemini-2.0-flash-001'),
+            // model: google('gemini-2.0-flash-001'),
+            model,
             schema: NarrationResponseSchema,
             prompt,
         })

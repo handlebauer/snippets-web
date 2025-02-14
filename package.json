@@ -12,6 +12,7 @@
     },
     "dependencies": {
         "@ai-sdk/google": "^1.1.11",
+        "@ai-sdk/openai": "^1.1.11",
         "@ai-sdk/react": "^1.1.12",
         "@codemirror/lang-javascript": "^6.2.2",
         "@codemirror/theme-one-dark": "^6.1.2",
