@@ -6,16 +6,23 @@ import { javascript } from '@codemirror/lang-javascript'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { ViewUpdate } from '@codemirror/view'
 import CodeMirror from '@uiw/react-codemirror'
-import { Code, MonitorPlay, Settings, Smartphone } from 'lucide-react'
+import { Code, Mic, MonitorPlay, Settings, Smartphone } from 'lucide-react'
 
 import { useSession } from '@/hooks/useSession'
 
 interface EditorToolbarProps {
     isRecording: boolean
+    isNarrating: boolean
     onToggleRecording: () => void
+    onToggleNarration: () => void
 }
 
-function EditorToolbar({ isRecording, onToggleRecording }: EditorToolbarProps) {
+function EditorToolbar({
+    isRecording,
+    isNarrating,
+    onToggleRecording,
+    onToggleNarration,
+}: EditorToolbarProps) {
     return (
         <div className="flex items-center justify-between px-4 py-2 bg-[#1E1E1E] border-b border-[#333333]">
             <div className="flex items-center gap-2">
@@ -23,6 +30,26 @@ function EditorToolbar({ isRecording, onToggleRecording }: EditorToolbarProps) {
                 <span className="text-white font-medium">Code Editor</span>
             </div>
             <div className="flex items-center gap-4">
+                <button
+                    onClick={onToggleNarration}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
+                        isNarrating
+                            ? 'bg-purple-500/10 text-purple-500'
+                            : 'bg-[#2A2A2A] text-white hover:bg-[#333333]'
+                    }`}
+                    // TODO: Uncomment this when narration is implemented
+                    // disabled={!isRecording}
+                    title={
+                        !isRecording
+                            ? 'Start recording to enable narration'
+                            : undefined
+                    }
+                >
+                    <Mic className="w-4 h-4" />
+                    <span className="text-sm font-medium">
+                        {isNarrating ? 'Stop Narration' : 'Narrate'}
+                    </span>
+                </button>
                 <button
                     onClick={onToggleRecording}
                     className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
@@ -156,7 +183,9 @@ export default function EditorPage() {
         <div className="h-screen flex flex-col bg-[#1A1A1A]">
             <EditorToolbar
                 isRecording={editor?.isRecording ?? false}
+                isNarrating={editor?.isNarrating ?? false}
                 onToggleRecording={handleToggleRecording}
+                onToggleNarration={editor?.toggleNarration ?? (() => {})}
             />
             <div className="flex-1 overflow-hidden">
                 <CodeMirror

@@ -27,10 +27,12 @@ interface ExtendedSessionState extends SessionState {
 interface EditorSessionAPI {
     content: string
     isRecording: boolean
+    isNarrating: boolean
     updateContent: (content: string, event: EditorEvent) => void
     initialize: () => void
     finishRecording: () => void
     startRecording: () => void
+    toggleNarration: () => void
 }
 
 interface ScreenSessionAPI {
@@ -250,10 +252,12 @@ export function useSession() {
         editorAPI = {
             content: editorSession.state.content,
             isRecording: editorSession.state.isRecording,
+            isNarrating: editorSession.state.isNarrating,
             updateContent: editorSession.updateContent,
             initialize: editorSession.initialize,
             finishRecording: editorSession.finishRecording,
             startRecording: editorSession.startRecording,
+            toggleNarration: editorSession.toggleNarration,
         }
     }
 

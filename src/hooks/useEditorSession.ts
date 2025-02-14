@@ -29,6 +29,7 @@ interface EditorState {
     isInitialContentSet: boolean
     mode: SessionMode
     isRecording: boolean
+    isNarrating: boolean
     events: EditorEvent[]
 }
 
@@ -39,6 +40,7 @@ const INITIAL_EDITOR_STATE: EditorState = {
     isInitialContentSet: false,
     mode: 'REALTIME',
     isRecording: false,
+    isNarrating: false,
     events: [],
 }
 
@@ -49,6 +51,8 @@ type BroadcastEvent =
     | 'editor_recording_finished'
     | 'editor_content'
     | 'editor_initialized'
+    | 'narration_started'
+    | 'narration_stopped'
 
 interface BroadcastMessage<T = unknown> {
     type: 'broadcast'
@@ -188,6 +192,31 @@ export function useEditorSession() {
         handleCleanup,
     ])
 
+    console.log('🎙️ [useEditorSession] State:', state)
+
+    // Add after finishRecording function
+    const toggleNarration = useCallback(() => {
+        if (!channel || !channelState.isConnected) return
+
+        const newNarrationState = !state.isNarrating
+        console.log(
+            `🎙️ [useEditorSession] ${newNarrationState ? 'Starting' : 'Stopping'} narration`,
+        )
+
+        setState(prev => ({ ...prev, isNarrating: newNarrationState }))
+
+        const message: BroadcastMessage<{ timestamp: number }> = {
+            type: 'broadcast',
+            event: newNarrationState
+                ? 'narration_started'
+                : 'narration_stopped',
+            payload: {
+                timestamp: Date.now(),
+            },
+        }
+        channel.send(message)
+    }, [channel, channelState.isConnected, state.isNarrating])
+
     // Channel event handlers setup
     useEffect(() => {
         console.log('🔄 [useEditorSession] Effect running:', {
@@ -243,6 +272,21 @@ export function useEditorSession() {
                 // Don't cleanup - let the web app show post recording view
             }
 
+            // Add after handleRecordingFinished in the channel event handlers
+            const handleNarrationStarted = () => {
+                console.log(
+                    '�� [useEditorSession] Narration started from mobile',
+                )
+                setState(prev => ({ ...prev, isNarrating: true }))
+            }
+
+            const handleNarrationStopped = () => {
+                console.log(
+                    '📱 [useEditorSession] Narration stopped from mobile',
+                )
+                setState(prev => ({ ...prev, isNarrating: false }))
+            }
+
             // Subscribe to events
             channel.on(
                 'broadcast',
@@ -253,6 +297,18 @@ export function useEditorSession() {
                 'broadcast',
                 { event: 'editor_recording_finished' },
                 handleRecordingFinished,
+            )
+
+            // Subscribe to narration events
+            channel.on(
+                'broadcast',
+                { event: 'narration_started' },
+                handleNarrationStarted,
+            )
+            channel.on(
+                'broadcast',
+                { event: 'narration_stopped' },
+                handleNarrationStopped,
             )
 
             // Subscribe to content updates if needed
@@ -296,18 +352,15 @@ export function useEditorSession() {
 
     return {
         state: {
+            ...channelState,
             ...state,
-            isConnected: channelState.isConnected,
-            isPairing: false,
-            error: channelState.error,
-            pairingCode: channelState.pairingCode || '',
-            sessionType: channelState.sessionType,
         },
-        handlePairDevice,
         updateContent,
         initialize,
-        cleanup: handleCleanup,
         finishRecording,
         startRecording,
+        toggleNarration,
+        cleanup: handleCleanup,
+        handlePairDevice,
     }
 }
