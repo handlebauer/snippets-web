@@ -2,9 +2,14 @@ import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateObject } from 'ai'
 import dedent from 'dedent'
+import OpenAI from 'openai'
 import { z } from 'zod'
 
-const MODEL_PROVIDER: 'openai' | 'google' = 'openai'
+const MODEL_PROVIDER: 'openai' | 'google' = 'google'
+
+const openaiClient = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+})
 
 const google = createGoogleGenerativeAI({
     apiKey: process.env.GEMINI_API_KEY,
@@ -15,9 +20,9 @@ const openai = createOpenAI({
 })
 
 const model =
-    MODEL_PROVIDER === 'openai'
-        ? openai('gpt-4o-mini')
-        : google('gemini-2.0-flash-001')
+    MODEL_PROVIDER === 'google'
+        ? google('gemini-2.0-flash-001')
+        : openai('gpt-4o-mini')
 
 // Define the input schema for the narration request
 const NarrationRequestSchema = z.object({
@@ -70,6 +75,7 @@ const NarrationRequestSchema = z.object({
 const NarrationResponseSchema = z.object({
     narration: z.string(),
     confidence: z.number(),
+    audioData: z.string(), // Base64 encoded audio data
     metadata: z
         .object({
             tone: z.enum(['neutral', 'technical', 'educational']),
@@ -127,17 +133,17 @@ const generatePrompt = ({
 
     ${metadata?.description ? `Developer's Description: ${metadata.description}` : ''}
 
-    1. Start by telling the viewer what you've added, removed, or modified
+    1. Start by briefly telling the viewer about the change in past-tense
     2. Do NOT begin your narration with "Okay" or "Alright" or any similar word
     3. Be a confident programmer and provide natural, conversational narration
     4. Assume you are speaking to users who are watching your coding session
-    5. Focus on the intent and significance of the changes
+    5. Focus on the intent and significance of the changes, not the specifics
     6. Favor concise, interesting narration (do not add unnecessary details)
 
     Consider:
     - The type and scope of changes
-    - The pace of editing (gaps between events)
-    - Any patterns in the changes
+    - Any interesting or noticeable patterns in the changes
+    - The more changes there are, the more concise and brief you should be
 
     - Parse for variable names and pronounce them as such, e.g.
         - \`numB = 3\` -> ✅ "num bee" (❌ numb)
@@ -166,22 +172,40 @@ export async function POST(request: Request) {
         })
 
         console.log('[editor-narration] Generated prompt:', prompt)
+        console.log('[editor-narration] Model:', model.provider)
 
         // Generate narration using AI
         const { object: narration } = await generateObject({
-            // model: google('gemini-2.0-flash-001'),
             model,
             schema: NarrationResponseSchema,
             prompt,
         })
 
+        // Generate speech using OpenAI's TTS API
+        const mp3 = await openaiClient.audio.speech.create({
+            model: 'tts-1',
+            voice: 'ash',
+            input: narration.narration,
+        })
+
+        // Convert audio to base64
+        const buffer = Buffer.from(await mp3.arrayBuffer())
+        const audioBase64 = buffer.toString('base64')
+
+        // Combine narration text and audio
+        const response = {
+            ...narration,
+            audioData: audioBase64,
+        }
+
         console.log('[editor-narration] Generated narration:', {
             confidence: narration.confidence,
             metadata: narration.metadata,
             narration: narration.narration,
+            audioLength: audioBase64.length,
         })
 
-        return new Response(JSON.stringify(narration), {
+        return new Response(JSON.stringify(response), {
             headers: { 'Content-Type': 'application/json' },
         })
     } catch (error) {
