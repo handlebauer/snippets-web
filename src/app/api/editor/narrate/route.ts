@@ -1,19 +1,23 @@
-// import { createGoogleGenerativeAI } from '@ai-sdk/google'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateObject } from 'ai'
 import dedent from 'dedent'
 import { z } from 'zod'
 
-// const google = createGoogleGenerativeAI({
-//     apiKey: process.env.GEMINI_API_KEY,
-// })
+const MODEL_PROVIDER: 'openai' | 'google' = 'openai'
+
+const google = createGoogleGenerativeAI({
+    apiKey: process.env.GEMINI_API_KEY,
+})
 
 const openai = createOpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 })
 
-// const model = google('gemini-2.0-flash-001')
-const model = openai('gpt-4o-mini')
+const model =
+    MODEL_PROVIDER === 'openai'
+        ? openai('gpt-4o-mini')
+        : google('gemini-2.0-flash-001')
 
 // Define the input schema for the narration request
 const NarrationRequestSchema = z.object({
