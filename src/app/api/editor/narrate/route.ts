@@ -27,6 +27,7 @@ const model =
 // Define the input schema for the narration request
 const NarrationRequestSchema = z.object({
     timestamp: z.number(),
+    lastNarration: z.string().optional(),
     eventGroup: z.object({
         events: z.array(
             z.object({
@@ -89,11 +90,13 @@ const generatePrompt = ({
     context,
     metadata,
     characterChanges,
+    lastNarration,
 }: {
     events: z.infer<typeof NarrationRequestSchema>['eventGroup']['events']
     context: z.infer<typeof NarrationRequestSchema>['eventGroup']['context']
     metadata?: z.infer<typeof NarrationRequestSchema>['eventGroup']['metadata']
     characterChanges: number
+    lastNarration?: string
 }) => {
     // Calculate time gaps between consecutive events
     const timeGaps = events.slice(1).map((event, i) => {
@@ -115,6 +118,8 @@ const generatePrompt = ({
 
     return dedent`
     Narrate this code change session in a clear, conversational way, as though you're the developer writing it:
+
+    ${lastNarration ? `Previous Narration: "${lastNarration}"` : ''}
 
     Context Before:
     ${context.before}
@@ -140,15 +145,16 @@ const generatePrompt = ({
     5. Focus on the intent and significance of the changes, not the specifics
     6. Favor concise, interesting narration (do not add unnecessary details)
 
+    If there is a previous narration:
+
+    1. Begin your narration in a way that is different from the previous narration
+    2. Do not repeat similar phrases or descriptions
+    3. Do not add trivial details or repeat the same information
+
     Consider:
-    - The type and scope of changes
+    - The type of changes and their impact
     - Any interesting or noticeable patterns in the changes
     - The more changes there are, the more concise and brief you should be
-
-    - Parse for variable names and pronounce them as such, e.g.
-        - \`numB = 3\` -> ✅ "num bee" (❌ numb)
-        - \`hasID = false\` -> ✅ "has eye dee" (❌ "has id" like "kid")
-        - \`newStr = ""\` -> ✅ "new string" (❌ "new stir/star")
     `
 }
 
@@ -156,12 +162,22 @@ export async function POST(request: Request) {
     try {
         const json = await request.json()
 
+        // Log raw request for debugging
+        console.log('[editor-narration] Raw request:', {
+            hasLastNarration: 'lastNarration' in json,
+            lastNarrationLength: json.lastNarration?.length,
+        })
+
         // Validate the request body
-        const { eventGroup } = NarrationRequestSchema.parse(json)
+        const { eventGroup, lastNarration } = NarrationRequestSchema.parse(json)
 
         console.log('[editor-narration] Received request:', {
             eventCount: eventGroup.events.length,
             changeType: eventGroup.metadata?.type,
+            hasLastNarration: !!lastNarration,
+            lastNarrationPreview: lastNarration
+                ? `${lastNarration.slice(0, 50)}...`
+                : null,
         })
 
         const prompt = generatePrompt({
@@ -169,6 +185,7 @@ export async function POST(request: Request) {
             context: eventGroup.context,
             metadata: eventGroup.metadata,
             characterChanges: eventGroup.characterChanges,
+            lastNarration,
         })
 
         console.log('[editor-narration] Generated prompt:', prompt)
@@ -186,6 +203,7 @@ export async function POST(request: Request) {
             model: 'tts-1',
             voice: 'ash',
             input: narration.narration,
+            speed: 1.2,
         })
 
         // Convert audio to base64
